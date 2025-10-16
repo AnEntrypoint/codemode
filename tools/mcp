@@ -1,0 +1,41 @@
+#!/usr/bin/env node
+
+// MCP tool that can be used from the execute context
+// This provides a simple interface to call any MCP server from within execution
+
+import { MCPClient } from '../mcp-client.js';
+
+const args = process.argv.slice(2);
+
+if (args.length === 0) {
+  console.error('Usage: mcp <server-name> <method> [params-json]');
+  console.error('');
+  console.error('Examples:');
+  console.error('  mcp filesystem tools/list');
+  console.error('  mcp filesystem tools/call \'{"name":"Read","arguments":{"file_path":"test.txt"}}\'');
+  console.error('  mcp codeMode tools/list');
+  console.error('  mcp codeMode tools/call \'{"name":"execute","arguments":{"code":"console.log(\'hello\')","workingDirectory":"."}}\'');
+  process.exit(1);
+}
+
+const [serverName, method, paramsJson] = args;
+
+try {
+  const client = new MCPClient(serverName, { command: 'node', args: ['index.js'] });
+
+  // Simple synchronous interface for tool calls
+  await client.start();
+
+  let params = {};
+  if (paramsJson) {
+    params = JSON.parse(paramsJson);
+  }
+
+  const response = await client.request(method, params);
+  console.log(JSON.stringify(response, null, 2));
+
+  await client.close();
+} catch (error) {
+  console.error('MCP Error:', error.message);
+  process.exit(1);
+}

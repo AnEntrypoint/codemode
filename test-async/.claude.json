@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "codemode": {
+      "command": "node",
+      "args": [
+        "/mnt/c/dev/codemode/code-mode.js"
+      ],
+      "env": {}
+    }
+  }
+}

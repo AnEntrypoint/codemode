@@ -1,0 +1,33 @@
+{
+  "name": "claude-tools-replica-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server that replicates all Claude's internal tools",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.19",
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "chokidar": "^3.5.3",
+    "fast-glob": "^3.3.3",
+    "node-fetch": "^3.3.2",
+    "uuid": "^9.0.1",
+    "which": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "claude",
+    "tools",
+    "replica",
+    "automation"
+  ],
+  "author": "lanmower",
+  "license": "MIT"
+}
