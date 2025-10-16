@@ -4,6 +4,9 @@
   "description": "MCP server that replicates all Claude's internal tools",
   "main": "index.js",
   "type": "module",
+  "bin": {
+    "codemode": "./cli.js"
+  },
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
