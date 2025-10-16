@@ -245,7 +245,7 @@ class UnifiedMCPServer {
         functionNames.add(functionName);
 
         // Generate function
-        const jsFunction = this.generateJSFunction(functionName, tool, serverName);
+        const jsFunction = this.generateJSFunction(functionName, tool, serverName, client);
         functionDefinitions += jsFunction + '\n\n';
       }
     }
@@ -259,7 +259,7 @@ ${userCode}
 `;
   }
 
-  generateJSFunction(functionName, tool, serverName) {
+  generateJSFunction(functionName, tool, serverName, client) {
     const params = tool.inputSchema?.properties || {};
     const requiredParams = tool.inputSchema?.required || [];
     const paramNames = Object.keys(params);

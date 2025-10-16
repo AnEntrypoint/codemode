@@ -1,10 +1,6 @@
 {
   "$schema": "https://schemas.modelcontextprotocol.io/0.1.0/mcp.json",
   "mcpServers": {
-    "filesystem": {
-      "command": "node",
-      "args": ["index.js"]
-    },
     "codeMode": {
       "command": "node",
       "args": ["code-mode.js"]

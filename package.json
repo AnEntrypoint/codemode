@@ -1,16 +1,15 @@
 {
   "name": "codemode-agent",
-  "version": "1.0.3",
-  "description": "MCP server that replicates all Claude's internal tools",
-  "main": "index.js",
+  "version": "1.0.4",
+  "description": "Claude Agent with unified MCP execute tool",
+  "main": "agent.js",
   "type": "module",
   "bin": {
     "codemode": "./cli.js"
   },
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js",
-    "test": "node test.js"
+    "start": "node agent.js --agent",
+    "dev": "node --watch agent.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.19",

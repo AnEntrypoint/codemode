@@ -193,6 +193,11 @@ Date: ${new Date().toISOString().split('T')[0]}`,
       options: {
         model: 'sonnet',
         permissionMode: 'bypassPermissions',
+        allowedTools: ['mcp__execute__call'],
+        disallowedTools: [
+          'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Read', 'Edit', 'Write',
+          'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell', 'SlashCommand'
+        ],
         mcpServers: {
           execute: {
             command: 'node',
