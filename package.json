@@ -5,7 +5,7 @@
   "main": "agent.js",
   "type": "module",
   "bin": {
-    "codemode": "./cli.js"
+    "codemode": "cli.js"
   },
   "scripts": {
     "start": "node agent.js --agent",
