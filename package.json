@@ -1,5 +1,5 @@
 {
-  "name": "claude-tools-replica-mcp-server",
+  "name": "codemode",
   "version": "1.0.0",
   "description": "MCP server that replicates all Claude's internal tools",
   "main": "index.js",
