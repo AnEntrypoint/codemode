@@ -1,182 +1,141 @@
 #!/usr/bin/env node
 
-// Minimal working agent - direct execution without MCP
-import { spawn } from 'child_process';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Parse command line arguments
 const args = process.argv.slice(2);
 const isAgentMode = args.includes('--agent');
 
 if (!isAgentMode) {
-  console.error('Usage: node minimal-agent.js --agent [task]');
+  console.error('Usage: node agent.js --agent [task]');
+  console.error('       codemode --agent [task]');
   process.exit(1);
 }
 
-// Extract task from arguments
 const taskIndex = args.indexOf('--agent') + 1;
 const task = taskIndex < args.length ? args.slice(taskIndex).join(' ') : 'Help me with this codebase';
 
-console.error('[Minimal Agent] Direct JavaScript Execution');
-console.error(`[Minimal Agent] Task: ${task}`);
-console.error('[Minimal Agent] Working directory:', process.cwd());
+console.error('[Agent] Starting Claude Code Agent');
+console.error(`[Agent] Task: ${task}`);
+console.error('[Agent] Working directory:', process.cwd());
 
-// Execute JavaScript code directly
-async function executeCode(code, workingDirectory = process.cwd()) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('node', ['-e', code], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: workingDirectory
-    });
-
-    let output = '';
-    let errorOutput = '';
-
-    proc.stdout.on('data', (data) => {
-      output += data.toString();
-    });
-
-    proc.stderr.on('data', (data) => {
-      errorOutput += data.toString();
-    });
-
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve({ output, error: errorOutput });
-      } else {
-        reject(new Error(`Execution failed (code ${code}): ${errorOutput}`));
-      }
-    });
-  });
+console.error('[Agent] Fetching additional tool documentation...');
+let additionalTools = '';
+try {
+  const startMd = execSync('curl -s https://raw.githubusercontent.com/AnEntrypoint/glootie-cc/refs/heads/master/start.md', { encoding: 'utf8' });
+  const mcpThorns = execSync('npx -y mcp-thorns@latest', { encoding: 'utf8' });
+  const wfgyHook = execSync('npx -y wfgy@latest hook', { encoding: 'utf8' });
+  additionalTools = `\n\n# Additional Tool Documentation\n\n${startMd}\n\n${mcpThorns}\n\n${wfgyHook}`;
+  console.error('[Agent] Additional tools loaded');
+} catch (error) {
+  console.error('[Agent] Warning: Failed to fetch additional tools:', error.message);
 }
 
-// Simple tool implementations
-const tools = {
-  async Read(path, offset, limit) {
-    const fs = await import('fs');
-    try {
-      let content = fs.readFileSync(path, 'utf8');
-      if (offset || limit) {
-        const lines = content.split('\n');
-        const start = offset || 0;
-        const end = limit ? start + limit : lines.length;
-        content = lines.slice(start, end).join('\n');
-      }
-      return content;
-    } catch (error) {
-      throw new Error(`Read failed: ${error.message}`);
-    }
-  },
+const agentPrompt = `You are an AI assistant with access to an execute tool that allows you to run JavaScript code programmatically.
 
-  async Write(path, content) {
-    const fs = await import('fs');
-    try {
-      fs.writeFileSync(path, content, 'utf8');
-      return `Wrote ${content.length} characters to ${path}`;
-    } catch (error) {
-      throw new Error(`Write failed: ${error.message}`);
-    }
-  },
+# Available Functions via Execute Tool
 
-  async Edit(path, oldString, newString, replaceAll = false) {
-    const fs = await import('fs');
-    try {
-      let content = fs.readFileSync(path, 'utf8');
-      if (replaceAll) {
-        content = content.split(oldString).join(newString);
-      } else {
-        content = content.replace(oldString, newString);
-      }
-      fs.writeFileSync(path, content, 'utf8');
-      return `Edited ${path}`;
-    } catch (error) {
-      throw new Error(`Edit failed: ${error.message}`);
-    }
-  },
+The execute tool provides these functions that you can call in your JavaScript code:
 
-  async Glob(pattern, path = process.cwd()) {
-    const { glob } = await import('glob');
-    try {
-      const files = glob.sync(pattern, { cwd: path });
-      return files;
-    } catch (error) {
-      throw new Error(`Glob failed: ${error.message}`);
-    }
-  },
+## File Operations
+- Read(path, offset?, limit?) - Read file content with optional offset and limit
+- Write(path, content) - Write content to file
+- Edit(path, oldString, newString, replaceAll?) - Edit file by replacing strings
+- Glob(pattern, path?) - Find files matching glob pattern
 
-  async Bash(command, description, timeout = 30000) {
-    return new Promise((resolve, reject) => {
-      const proc = spawn(command, { shell: true, stdio: 'pipe' });
-      let output = '';
-      let errorOutput = '';
+## Search Operations
+- Grep(pattern, path?, options?) - Search for pattern in files using ripgrep
+  Options: {glob, type, output_mode, '-i', '-n', '-A', '-B', '-C', multiline, head_limit}
 
-      proc.stdout.on('data', (data) => output += data.toString());
-      proc.stderr.on('data', (data) => errorOutput += data.toString());
+## System Operations
+- Bash(command, description?, timeout?) - Execute shell command
+- LS(path?, show_hidden?, recursive?) - List directory contents
 
-      const timer = setTimeout(() => {
-        proc.kill();
-        reject(new Error(`Command timed out after ${timeout}ms`));
-      }, timeout);
+## Web Operations
+- WebFetch(url, prompt) - Fetch and analyze web content
+- WebSearch(query, allowed_domains?, blocked_domains?) - Search the web
 
-      proc.on('close', (code) => {
-        clearTimeout(timer);
-        if (code === 0) {
-          resolve({ output, error: errorOutput });
-        } else {
-          reject(new Error(`Command failed with code ${code}: ${errorOutput}`));
-        }
-      });
-    });
-  }
-};
+## Task Management
+- TodoWrite(todos) - Write todo list
+  Format: [{content, status, activeForm}] where status is 'pending'|'in_progress'|'completed'
 
-// Run agent task
-async function runAgentTask(task) {
+## MCP Tools (from configured servers)
+All MCP tools from glootie, playwright, and vexify are also available as functions.
+Use browser automation, code analysis, and semantic search tools as needed.
+
+# Instructions
+
+- Use the execute tool to run JavaScript code with these functions available
+- You can call functions programmatically - no need for linear tool-by-tool execution
+- Write code that completes the entire task in one execution
+- Use async/await for async operations
+- Show progress with console.log
+- Focus on completing the user's task efficiently
+
+# Task
+${task}
+
+# Context
+Working directory: ${process.cwd()}
+Date: ${new Date().toISOString().split('T')[0]}${additionalTools}`;
+
+async function runAgent() {
   try {
-    console.error(`[Minimal Agent] Processing task...`);
-
-    // Generate code to execute the task
-    const code = `
-import('fs').then(fs => {
-  import('path').then(path => {
-    import('child_process').then(cp => {
-
-      // Simple file operations
-      const files = fs.readdirSync('.').filter(f => f.endsWith('.js'));
-      console.log('JavaScript files in this directory:');
-      files.forEach(file => console.log('  - ' + file));
-
-      console.log('\\nTask:', ${JSON.stringify(task)});
-      console.log('Working directory:', process.cwd());
-      console.log('Available tools: Read, Write, Edit, Glob, Bash');
-
+    const agentQuery = query({
+      prompt: agentPrompt,
+      options: {
+        model: 'sonnet',
+        permissionMode: 'bypassPermissions',
+        allowedTools: ['mcp__codeMode__execute'],
+        disallowedTools: [
+          'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Read', 'Edit', 'Write',
+          'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell',
+          'SlashCommand', 'Skill'
+        ],
+        mcpServers: {
+          codeMode: {
+            type: 'stdio',
+            command: 'node',
+            args: [dirname(__filename) + '/code-mode.js'],
+            cwd: __dirname
+          }
+        }
+      }
     });
-  });
-}).catch(err => {
-  console.error('Error:', err.message);
-});
-`;
 
-    const result = await executeCode(code);
-
-    if (result.output) {
-      console.log(result.output);
+    for await (const message of agentQuery) {
+      if (message.type === 'text') {
+        console.log(message.text);
+      } else if (message.type === 'assistant') {
+        if (message.message && message.message.content) {
+          const content = message.message.content;
+          if (Array.isArray(content)) {
+            content.forEach(item => {
+	      //console.log(item);    
+              if (item.type === 'text') {
+                console.log(item.text);
+              } else if(item.type === 'code') {
+		console.log('---RUN---');
+		console.log(item.code);
+		console.log('---------');
+	      }
+            });
+          }
+        }
+      }
     }
-    if (result.error) {
-      console.error('[Stderr]', result.error);
-    }
 
-    console.error('[Minimal Agent] Task completed successfully');
+    console.error('[Agent] Task completed');
 
   } catch (error) {
-    console.error(`[Minimal Agent] Error: ${error.message}`);
+    console.error(`[Agent] Error: ${error.message}`);
     process.exit(1);
   }
 }
 
-// Run the agent
-runAgentTask(task);
+runAgent();

@@ -1,11 +1,12 @@
 {
   "name": "codemode-agent",
-  "version": "1.0.6",
-  "description": "Claude Agent with working JavaScript execution (SDK approach replaced due to fundamental bugs)",
+  "version": "1.0.10",
+  "description": "Claude agent with execute tool providing programmatic access to file operations, system commands, and MCP tools",
   "main": "agent.js",
   "type": "module",
   "bin": {
-    "codemode": "cli.js"
+    "codemode": "cli.js",
+    "codemode-mcp": "code-mode.js"
   },
   "scripts": {
     "start": "node agent.js --agent",
