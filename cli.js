@@ -1,3 +1,9 @@
 #!/usr/bin/env node
 
-import './index.js';
+const args = process.argv.slice(2);
+
+if (args.includes('--agent')) {
+  import('./agent.js');
+} else {
+  import('./index.js');
+}
