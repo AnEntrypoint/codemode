@@ -328,6 +328,11 @@ class ExecutionContextManager {
 
         // Generate function that calls MCP tool via IPC, filtering out null/undefined values
         functions += `
+/**
+ * ${tool.name} - ${tool.description}
+ * IMPORTANT: This is an async function. Always use 'await' when calling it.
+ * Example: const result = await ${tool.name}(${paramNames.slice(0, Math.min(2, paramNames.length)).join(', ')});
+ */
 global.${tool.name} = ${signature} {
 ${validation ? validation + '\n' : ''}  const args = {};
 ${paramNames.map((p, i) => `  if (${safeParamNames[i]} !== null && ${safeParamNames[i]} !== undefined) args.${p} = ${safeParamNames[i]};`).join('\n')}

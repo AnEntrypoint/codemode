@@ -125,6 +125,11 @@ process.on('message', (msg) => {
       }
     };
 
+    // Log reminder about async tools
+    originalConsoleLog('[Execution worker ready]');
+    originalConsoleLog('[IMPORTANT] All MCP tools are async functions. Always use "await" when calling them.');
+    originalConsoleLog('[Example] const result = await Read("file.txt");');
+
     process.send({ type: 'INIT_COMPLETE' });
   }
 });
