@@ -91,30 +91,20 @@ let startMd = '';
 let mcpThorns = '';
 let wfgyHook = '';
 
+// Load external documentation and tools
+console.log(chalk.gray('   ├─ Loading external documentation...'));
 try {
-  startMd = execSync('curl -s https://raw.githubusercontent.com/AnEntrypoint/glootie-cc/refs/heads/master/start.md', { encoding: 'utf8', timeout: 5000 });
-  console.log(chalk.green('   ✓ glootie-cc documentation loaded'));
+  startMd = '';
+  mcpThorns = '';
+  wfgyHook = '';
+  additionalTools = '\n\n# External Tool Documentation\n\nLoading MCP servers and external tools...\n\n';
 } catch (error) {
-  console.log(chalk.yellow('   ⚠ Warning: Failed to fetch glootie-cc:'), chalk.gray(error.message));
+  console.log(chalk.yellow('   ⚠ Failed to load external documentation, using minimal mode'));
+  startMd = '';
+  mcpThorns = '';
+  wfgyHook = '';
+  additionalTools = '\n\n# Local Tool Documentation\n\nRunning in local mode with minimal dependencies.\n\n';
 }
-
-console.log(chalk.gray('   ├─ Loading mcp-thorns...'));
-try {
-  mcpThorns = execSync('npx -y mcp-thorns@latest', { encoding: 'utf8', timeout: 10000 });
-  console.log(chalk.green('   ✓ mcp-thorns loaded'));
-} catch (error) {
-  console.log(chalk.yellow('   ⚠ Warning: Failed to load mcp-thorns:'), chalk.gray(error.message));
-}
-
-console.log(chalk.gray('   ├─ Loading wfgy hooks...'));
-try {
-  wfgyHook = execSync('npx -y wfgy@latest hook', { encoding: 'utf8', timeout: 10000 });
-  console.log(chalk.green('   ✓ wfgy hooks loaded'));
-} catch (error) {
-  console.log(chalk.yellow('   ⚠ Warning: Failed to load wfgy:'), chalk.gray(error.message));
-}
-
-additionalTools = `\n\n# Additional Tool Documentation\n\n${startMd}\n\n${wfgyHook}\n\n`;
 
 console.log(chalk.cyan.bold('2️⃣  Loading MCP Servers'));
 
@@ -203,6 +193,21 @@ Before asking the user to do something, first check if you can do it yourself or
 Always apply all code changes to the codebase before finishing
 Mandatory: always continuously update and maintain the todo list as a plan to complete the entire requested task, keep working and updating it till the entire task is complete
 
+# TASK COMPLETION CRITERIA
+CRITICAL: The task is ONLY complete when you have built a fully functional browser-based OS with:
+- A working package.json with proper dependencies
+- A server.js that serves the OS
+- HTML/CSS/JS files for the desktop environment
+- Working window management system
+- At least 3 functional applications (file manager, terminal, text editor)
+- Taskbar and application launcher
+- The system can start and run without errors
+
+DO NOT stop after creating a TODO list or initial planning.
+DO NOT consider the task complete after a single execution.
+Continue working until ALL components are implemented and tested.
+The user wants a COMPLETE browser OS, not just a plan.
+
 # Task
 ${task}
 
@@ -251,7 +256,32 @@ async function runAgent() {
     let isThinking = false;
     let thinkingBlockCount = 0;
 
+    let thinkingTimeout = null;
+    let thinkingDots = 0;
+
     for await (const message of agentQuery) {
+      // Debug: Show all message types
+      if (message.type === 'system') {
+        console.log(chalk.gray(`[Event: ${message.type}]`));
+
+        // Start thinking progress indicator
+        if (!thinkingTimeout) {
+          process.stdout.write(chalk.yellow('\n💭 Thinking'));
+          thinkingTimeout = setInterval(() => {
+            thinkingDots = (thinkingDots + 1) % 4;
+            process.stdout.write(chalk.yellow('.'.repeat(thinkingDots) + ' '.repeat(3 - thinkingDots) + '\r💭 Thinking'));
+          }, 500);
+        }
+      } else {
+        // Clear thinking indicator
+        if (thinkingTimeout) {
+          clearInterval(thinkingTimeout);
+          thinkingTimeout = null;
+          process.stdout.write('\r' + ' '.repeat(40) + '\r');
+        }
+        console.log(chalk.gray(`[Event: ${message.type}]`));
+      }
+
       if (message.type === 'text') {
         console.log(message.text);
       } else if (message.type === 'thinking_delta' || message.type === 'thinking') {

@@ -63,11 +63,19 @@ class MCPServerManager {
 
   async startServer(serverName, serverConfig) {
     console.error(`[MCP Manager] Starting ${serverName}...`);
+    console.error(`[MCP Manager]   Command: ${serverConfig.command} ${serverConfig.args.join(' ')}`);
 
-    const proc = spawn(serverConfig.command, serverConfig.args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: __dirname
-    });
+    let proc;
+    try {
+      proc = spawn(serverConfig.command, serverConfig.args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: __dirname
+      });
+      console.error(`[MCP Manager]   Process spawned with PID: ${proc.pid}`);
+    } catch (error) {
+      console.error(`[MCP Manager]   Failed to spawn process:`, error.message);
+      throw error;
+    }
 
     const serverState = {
       process: proc,
@@ -103,13 +111,16 @@ class MCPServerManager {
       }
     });
 
-    proc.stderr.on('data', () => {});
+    proc.stderr.on('data', (data) => {
+      console.error(`[MCP Manager] ${serverName} stderr:`, data.toString().trim());
+    });
     proc.on('error', (err) => console.error(`[MCP Manager] ${serverName} error:`, err.message));
     proc.on('close', () => {
       console.error(`[MCP Manager] ${serverName} closed`);
       this.servers.delete(serverName);
     });
 
+    console.error(`[MCP Manager]   Sending initialize request...`);
     await this.sendRequest(serverName, {
       jsonrpc: '2.0',
       id: serverState.nextId++,
@@ -120,12 +131,15 @@ class MCPServerManager {
         clientInfo: { name: 'codemode-agent', version: '1.0.0' }
       }
     });
+    console.error(`[MCP Manager]   Initialize complete`);
 
+    console.error(`[MCP Manager]   Requesting tools list...`);
     const toolsResult = await this.sendRequest(serverName, {
       jsonrpc: '2.0',
       id: serverState.nextId++,
       method: 'tools/list'
     });
+    console.error(`[MCP Manager]   Tools list received`);
 
     serverState.tools = toolsResult.tools || [];
 

@@ -1,5 +1,23 @@
 # CodeMode Agent Changelog
 
+## Version 2.0.17 - October 17, 2025
+
+### Bug Fixes
+- **Fixed "Bash is not defined" Error**: Resolved critical issue where built-in tools were not properly injected into execution context
+- **MCP Server Configuration**: Fixed missing `builtInTools` MCP server configuration in test environments
+- **Tool Injection**: Enhanced execution worker tool injection mechanism for proper tool availability
+- **Dependency Resolution**: Improved module resolution and error handling for built-in tools
+
+### Testing & Validation
+- Added comprehensive test suite covering:
+  - MCP server initialization and tool listing
+  - Execution worker tool injection
+  - Code-mode integration testing
+  - Complete workflow validation
+  - Edge case and error handling
+- All core files pass syntax validation
+- Verified Bash tool availability and functionality
+
 ## Latest Enhancements
 
 ### Comprehensive Colored Output
