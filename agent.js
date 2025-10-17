@@ -194,7 +194,7 @@ Use browser automation, code analysis, and semantic search tools as needed.
 - Use the execute tool to run JavaScript code with these functions available
 - You can call functions programmatically - no need for linear tool-by-tool execution
 - Write code that completes the entire task, use as many executions as you need to
-- When calling tools
+- When calling tools, instead of logging exhaustively, use code to intelligently pick out the information you need, use zero unneccesary symbols in execution logs to keep the output clean and readable
 - Use async/await for async operations
 - Show progress with console.log
 - Focus on completing the user's task efficiently
@@ -295,7 +295,7 @@ async function runAgent() {
                       } else if (value.includes('\n')) {
                         console.log(displayKey);
                         const lines = value.split('\n');
-                        lines.slice(0, 10).forEach(line => {
+                        lines.forEach(line => {
                           console.log(chalk.gray('          ') + chalk.white(line));
                         });
                         if (lines.length > 10) {
@@ -321,7 +321,7 @@ async function runAgent() {
         console.log(chalk.green.bold('✓ Tool Result'));
         console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
         if (message.content) {
-          const preview = String(message.content).slice(0, 500);
+          const preview = String(message.content);
           console.log(chalk.white(preview));
           if (String(message.content).length > 500) {
             console.log(chalk.gray(`... (${String(message.content).length} total characters)`));
