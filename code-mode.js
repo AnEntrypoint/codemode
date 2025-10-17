@@ -446,6 +446,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ['workingDirectory', 'code']
         }
+      },
+      {
+        name: 'createWindow',
+        description: 'Create a new browser window using Playwright. This is a convenience wrapper around browser_navigate.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'URL to navigate to in the new window'
+            },
+            width: {
+              type: 'number',
+              description: 'Window width in pixels (optional, default: 1280)'
+            },
+            height: {
+              type: 'number',
+              description: 'Window height in pixels (optional, default: 720)'
+            }
+          },
+          required: ['url']
+        }
       }
     ]
   };
@@ -454,43 +476,91 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  if (name !== 'execute') {
-    return {
-      content: [{ type: 'text', text: `Unknown tool: ${name}` }],
-      isError: true
-    };
-  }
+  if (name === 'createWindow') {
+    try {
+      const { url, width = 1280, height = 720 } = args;
 
-  try {
-    const { code, workingDirectory } = args;
+      if (!url) {
+        throw new Error('url is required');
+      }
 
-    if (!code || !workingDirectory) {
-      throw new Error('code and workingDirectory are required');
-    }
+      // Use the execution context to call Playwright browser tools
+      const code = `
+        // Resize browser if dimensions provided
+        if (${width} && ${height}) {
+          try {
+            await browser_resize(${width}, ${height});
+            console.log('Browser resized to ${width}x${height}');
+          } catch (e) {
+            console.log('Browser resize not available or failed:', e.message);
+          }
+        }
 
-    const absWorkingDir = resolve(workingDirectory);
-    if (!existsSync(absWorkingDir)) {
-      throw new Error(`Working directory does not exist: ${absWorkingDir}`);
-    }
+        // Navigate to URL
+        await browser_navigate('${url.replace(/'/g, "\\'")}');
+        console.log('Navigated to ${url.replace(/'/g, "\\'")}');
 
-    const result = await executionContext.execute(code, absWorkingDir);
+        // Return success
+        'Window created and navigated to ${url.replace(/'/g, "\\'")}'
+      `;
 
-    if (result.success) {
+      const result = await executionContext.execute(code, process.cwd());
+
+      if (result.success) {
+        return {
+          content: [{ type: 'text', text: result.output || `Window created successfully at ${url}` }]
+        };
+      } else {
+        return {
+          content: [{ type: 'text', text: result.output || 'Failed to create window' }],
+          isError: true
+        };
+      }
+    } catch (error) {
       return {
-        content: [{ type: 'text', text: result.output || 'Code executed successfully' }]
-      };
-    } else {
-      return {
-        content: [{ type: 'text', text: result.output || 'Unknown error' }],
+        content: [{ type: 'text', text: `Error creating window: ${error.message}` }],
         isError: true
       };
     }
-  } catch (error) {
-    return {
-      content: [{ type: 'text', text: `Error: ${error.message}` }],
-      isError: true
-    };
   }
+
+  if (name === 'execute') {
+    try {
+      const { code, workingDirectory } = args;
+
+      if (!code || !workingDirectory) {
+        throw new Error('code and workingDirectory are required');
+      }
+
+      const absWorkingDir = resolve(workingDirectory);
+      if (!existsSync(absWorkingDir)) {
+        throw new Error(`Working directory does not exist: ${absWorkingDir}`);
+      }
+
+      const result = await executionContext.execute(code, absWorkingDir);
+
+      if (result.success) {
+        return {
+          content: [{ type: 'text', text: result.output || 'Code executed successfully' }]
+        };
+      } else {
+        return {
+          content: [{ type: 'text', text: result.output || 'Unknown error' }],
+          isError: true
+        };
+      }
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `Error: ${error.message}` }],
+        isError: true
+      };
+    }
+  }
+
+  return {
+    content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+    isError: true
+  };
 });
 
 async function main() {

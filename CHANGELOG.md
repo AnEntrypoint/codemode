@@ -1,5 +1,20 @@
 # CodeMode Agent Changelog
 
+## Version 2.0.18 - October 17, 2025
+
+### New Features
+- **Added createWindow Tool**: New convenience tool for creating browser windows with Playwright
+  - `mcp__codeMode__createWindow(url, width, height)`
+  - Automatically resizes browser and navigates to specified URL
+  - Simplifies common browser automation workflows
+  - Integrates with existing Playwright MCP tools
+
+### Implementation Details
+- Tool added to code-mode.js MCP server
+- Wraps `browser_resize` and `browser_navigate` Playwright tools
+- Default dimensions: 1280x720 pixels
+- Proper error handling and validation
+
 ## Version 2.0.17 - October 17, 2025
 
 ### Bug Fixes
