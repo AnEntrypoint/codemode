@@ -42,7 +42,8 @@ function loadConfig() {
   return { mcpServers: {} };
 }
 
-function getBuiltInToolSchemas() {
+// Removed getBuiltInToolSchemas - tools now come from builtInTools MCP server
+function _removed_getBuiltInToolSchemas() {
   return [
     {
       name: 'Read',
@@ -174,7 +175,8 @@ function getBuiltInToolSchemas() {
   ];
 }
 
-function createToolsModule(workingDirectory) {
+// Removed createToolsModule - tools now come from builtInTools MCP server
+function _removed_createToolsModule(workingDirectory) {
   return `
 const { spawn } = require('child_process');
 const { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } = require('fs');
@@ -618,12 +620,9 @@ ${validation ? validation + '\n' : ''}  return new Promise((resolve, reject) => 
 }
 
 async function executeCode(code, workingDirectory) {
-  const toolsModule = createToolsModule(workingDirectory);
   const { functions: mcpFunctions } = await generateMCPFunctions();
 
   const wrappedCode = `
-${toolsModule}
-
 ${mcpFunctions}
 
 (async () => {
@@ -670,19 +669,10 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   const { toolDescriptions } = await generateMCPFunctions();
-  const builtInTools = getBuiltInToolSchemas();
-
-  let builtInToolsList = '\n## Built-in Functions:\n';
-  builtInTools.forEach(tool => {
-    const params = Object.keys(tool.inputSchema?.properties || {})
-      .map(p => tool.inputSchema.required?.includes(p) ? p : `${p}?`)
-      .join(', ');
-    builtInToolsList += `- ${tool.name}(${params}): ${tool.description}\n`;
-  });
 
   let mcpToolsList = '';
   if (Object.keys(toolDescriptions).length > 0) {
-    mcpToolsList = '\n\n## MCP Tools by Server:\n';
+    mcpToolsList = '\n## Available Tools by MCP Server:\n';
     for (const [serverName, tools] of Object.entries(toolDescriptions)) {
       mcpToolsList += `\n### ${serverName}:\n`;
       tools.forEach(tool => {
@@ -694,7 +684,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     }
   }
 
-  const description = `Execute JavaScript code with access to file operations, system commands, and MCP tools from configured servers.${builtInToolsList}${mcpToolsList}`;
+  const description = `Execute JavaScript code with access to all MCP tools from configured servers.${mcpToolsList}`;
 
   return {
     tools: [
@@ -710,7 +700,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             code: {
               type: 'string',
-              description: 'JavaScript code to execute with embedded functions available'
+              description: 'JavaScript code to execute with MCP tool functions available'
             }
           },
           required: ['workingDirectory', 'code']
