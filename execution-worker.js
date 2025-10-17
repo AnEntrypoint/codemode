@@ -6,6 +6,47 @@
 const pendingMCPCalls = new Map();
 let nextCallId = 0;
 
+// Capture console output
+let capturedOutput = '';
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+
+function startCapture() {
+  capturedOutput = '';
+
+  console.log = (...args) => {
+    const msg = args.map(arg =>
+      typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+    ).join(' ');
+    capturedOutput += msg + '\n';
+    originalConsoleLog(...args);
+  };
+
+  console.error = (...args) => {
+    const msg = args.map(arg =>
+      typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+    ).join(' ');
+    capturedOutput += msg + '\n';
+    originalConsoleError(...args);
+  };
+
+  console.warn = (...args) => {
+    const msg = args.map(arg =>
+      typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+    ).join(' ');
+    capturedOutput += msg + '\n';
+    originalConsoleWarn(...args);
+  };
+}
+
+function stopCapture() {
+  console.log = originalConsoleLog;
+  console.error = originalConsoleError;
+  console.warn = originalConsoleWarn;
+  return capturedOutput;
+}
+
 // Handle messages from parent
 process.on('message', (msg) => {
   if (msg.type === 'MCP_RESULT') {
@@ -24,12 +65,26 @@ process.on('message', (msg) => {
     const { execId, code, workingDirectory } = msg;
 
     (async () => {
+      startCapture();
       try {
         process.chdir(workingDirectory);
-        await eval(`(async () => { ${code} })()`);
-        process.send({ type: 'EXEC_RESULT', execId, success: true, output: '' });
+        const result = await eval(`(async () => { ${code} })()`);
+
+        // If the code returns a value, add it to output
+        if (result !== undefined) {
+          console.log(result);
+        }
+
+        const output = stopCapture();
+        process.send({ type: 'EXEC_RESULT', execId, success: true, output });
       } catch (err) {
-        process.send({ type: 'EXEC_RESULT', execId, success: false, error: err.message });
+        const output = stopCapture();
+        process.send({
+          type: 'EXEC_RESULT',
+          execId,
+          success: false,
+          error: `${output}\nError: ${err.message}\n${err.stack}`
+        });
       }
     })();
   } else if (msg.type === 'INIT_TOOLS') {
@@ -46,7 +101,7 @@ process.on('message', (msg) => {
         'console', 'process', 'Buffer', 'global',
         'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
         'setImmediate', 'clearImmediate',
-        'clear_context', ...Object.keys(global).filter(k => k.startsWith('browser_') || k.startsWith('mcp_'))
+        'clear_context', ...Object.keys(global).filter(k => k.startsWith('browser_') || k.startsWith('mcp_') || k.startsWith('search_'))
       ]);
 
       for (const key of Object.keys(global)) {
@@ -86,4 +141,4 @@ global.__callMCPTool = async (serverName, toolName, args) => {
   });
 };
 
-console.log('[Execution worker ready]');
+originalConsoleLog('[Execution worker ready]');
