@@ -193,7 +193,8 @@ Use browser automation, code analysis, and semantic search tools as needed.
 
 - Use the execute tool to run JavaScript code with these functions available
 - You can call functions programmatically - no need for linear tool-by-tool execution
-- Write code that completes the entire task in one execution
+- Write code that completes the entire task, use as many executions as you need to
+- When calling tools
 - Use async/await for async operations
 - Show progress with console.log
 - Focus on completing the user's task efficiently

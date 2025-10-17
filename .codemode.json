@@ -9,10 +9,6 @@
       "command": "node",
       "args": ["built-in-tools-mcp.js"]
     },
-    "glootie": {
-      "command": "npx",
-      "args": ["-y", "mcp-glootie@latest"]
-    },
     "playwright": {
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
