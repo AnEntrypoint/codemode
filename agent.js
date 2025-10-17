@@ -141,7 +141,7 @@ const mcpServerNames = Object.keys(mcpConfig.mcpServers || {}).filter(name => na
 if (mcpServerNames.length > 0) {
   mcpServerNames.forEach((serverName, index) => {
     const server = mcpConfig.mcpServers[serverName];
-    const isLast = index === mcpServerNames.length 1;
+    const isLast = index === mcpServerNames.length - 1;
     const prefix = isLast ? '   └─' : '   ├─';
     console.log(chalk.gray(`${prefix} ${serverName}: ${server.command} ${server.args.join(' ')}`));
   });
