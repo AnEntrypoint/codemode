@@ -467,7 +467,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     } else {
       return {
-        content: [{ type: 'text', text: `Error: ${result.error}` }],
+        content: [{ type: 'text', text: result.output || 'Unknown error' }],
         isError: true
       };
     }
