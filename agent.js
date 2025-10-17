@@ -73,7 +73,7 @@ const task = taskIndex < args.length ? args.slice(taskIndex).join(' ') : 'Clean 
 
 console.log('');
 console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-console.log(chalk.blue.bold('  CodeMode Agent - Session Start'));
+console.log(chalk.blue.bold('  CodeMode Agent Session Start'));
 console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
 console.log('');
 console.log(chalk.cyan.bold('📋 Task:'), chalk.white(task));
@@ -141,7 +141,7 @@ const mcpServerNames = Object.keys(mcpConfig.mcpServers || {}).filter(name => na
 if (mcpServerNames.length > 0) {
   mcpServerNames.forEach((serverName, index) => {
     const server = mcpConfig.mcpServers[serverName];
-    const isLast = index === mcpServerNames.length - 1;
+    const isLast = index === mcpServerNames.length 1;
     const prefix = isLast ? '   └─' : '   ├─';
     console.log(chalk.gray(`${prefix} ${serverName}: ${server.command} ${server.args.join(' ')}`));
   });
@@ -159,28 +159,28 @@ console.log('');
 
 const agentPrompt = `You are an AI assistant with access to an execute tool that allows you to run JavaScript code in real time.
 
-# Execute Tool - persistent-context repl interface with extra tools, execute provides these functions that you can call in your JavaScript code:
+# Execute Tool persistent-context repl interface with extra tools, execute provides these functions that you can call in your JavaScript code:
 
 ## File Operations
-- Read(path, offset?, limit?) - Read file content with optional offset and limit
-- Write(path, content) - Write content to file
-- Edit(path, oldString, newString, replaceAll?) - Edit file by replacing strings
-- Glob(pattern, path?) - Find files matching glob pattern
+Read(path, offset?, limit?) Read file content with optional offset and limit
+Write(path, content) Write content to file
+Edit(path, oldString, newString, replaceAll?) Edit file by replacing strings
+Glob(pattern, path?) Find files matching glob pattern
 
 ## Search Operations
-- Grep(pattern, path?, options?) - Search for pattern in files using ripgrep
+Grep(pattern, path?, options?) Search for pattern in files using ripgrep
   Options: {glob, type, output_mode, '-i', '-n', '-A', '-B', '-C', multiline, head_limit}
 
 ## System Operations
-- Bash(command, description?, timeout?) - Execute shell command
-- LS(path?, show_hidden?, recursive?) - List directory contents
+Bash(command, description?, timeout?) Execute shell command
+LS(path?, show_hidden?, recursive?) List directory contents
 
 ## Web Operations
-- WebFetch(url, prompt) - Fetch and analyze web content
-- WebSearch(query, allowed_domains?, blocked_domains?) - Search the web
+WebFetch(url, prompt) Fetch and analyze web content
+WebSearch(query, allowed_domains?, blocked_domains?) Search the web
 
 ## Task Management
-- TodoWrite(todos) - Write todo list
+TodoWrite(todos) Write todo list
   Format: [{content, status, activeForm}] where status is 'pending'|'in_progress'|'completed'
 
 ## MCP Tools (from configured servers)
@@ -189,15 +189,16 @@ Use browser automation, code analysis, and semantic search tools as needed.
 
 # Instructions
 
-- Avoid using const in execute use mutables that can be overridden later
-- Use the execute tool to run JavaScript code with these functions available
-- use programmatic flow to reduce the amount of execute calls needed, conditionals, loops, and code structure is available to you - no need for linear tool-by-tool execution
-- Write code that completes the entire task, use as many executions as you need to
-- When calling tools, instead of logging exhaustively, use code to intelligently pick out the information you need, use zero unneccesary symbols in execution logs to keep the output clean and readable
-- Use async/await for async operations
-- Show progress with console.log
-- Focus on completing the user's task efficiently
-- When a sub task is finished, clear the execution context to clear all the variables etc.
+Avoid using const in execute use mutables that can be overridden later
+Use the execute tool to run JavaScript code with these functions available
+use programmatic flow to reduce the amount of execute calls needed, conditionals, loops, and code structure is available to you no need for linear tool-by-tool execution
+Write code that completes the entire task, use as many executions as you need to
+When calling tools, instead of logging exhaustively, use code to intelligently pick out the information you need, use zero unneccesary symbols in execution logs to keep the output clean and readable
+Use async/await for async operations
+Show progress with console.log
+Focus on completing the user's task efficiently
+When a sub task is finished, clear the execution context to clear all the variables etc.
+All MCP tools are async functions. Always use "await" when calling them.
 
 Mandatory: always continuously update and maintain the todo list as a plan to complete the entire requested task, keep working and updating it till the entire task is complete
 

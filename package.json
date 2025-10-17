@@ -1,6 +1,6 @@
 {
   "name": "codemode-agent",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "description": "Claude agent with execute tool providing programmatic access to file operations, system commands, and MCP tools",
   "main": "agent.js",
   "type": "module",
@@ -15,10 +15,12 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.19",
     "@modelcontextprotocol/sdk": "^0.5.0",
+    "@mozilla/readability": "^0.6.0",
     "chalk": "^5.6.2",
     "chokidar": "^3.5.3",
     "fast-glob": "^3.3.3",
     "highlight.js": "^11.11.1",
+    "jsdom": "^27.0.0",
     "node-fetch": "^3.3.2",
     "uuid": "^9.0.1",
     "which": "^4.0.0",
