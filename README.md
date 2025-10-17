@@ -17,27 +17,44 @@ npm install
 
 ## Usage
 
-### Start Agent
+The tool supports two modes: **Agent Mode** and **MCP Server Mode**.
+
+### Agent Mode
+
+Run Claude agent with execute tool for autonomous task completion:
 
 ```bash
 # Using npm
 npm start -- "Your task here"
 
 # Using Node directly
-node agent.js --agent "Your task here"
+node cli.js --agent "Your task here"
 
-# After publishing to npm
+# Via npx (recommended)
 npx codemode-agent --agent "Your task here"
 ```
 
-### Run MCP Server
+### MCP Server Mode
+
+Start the MCP server that provides the execute tool:
 
 ```bash
-# Direct execution
-node code-mode.js
+# Using Node directly
+node cli.js --mcp
 
-# Via npx (after publishing)
-npx codemode-mcp
+# Via npx (recommended)
+npx codemode-agent --mcp
+```
+
+### Quick Reference
+
+```bash
+# Agent mode examples
+npx codemode-agent --agent "Create a file called test.txt"
+npx codemode-agent --agent "Navigate to example.com and get the title"
+
+# MCP server mode (for use with Claude Desktop or other MCP clients)
+npx codemode-agent --mcp
 ```
 
 ## Examples
@@ -45,19 +62,19 @@ npx codemode-mcp
 ### Create a file
 
 ```bash
-node agent.js --agent "Create a file called test.txt with content 'Hello World'"
+npx codemode-agent --agent "Create a file called test.txt with content 'Hello World'"
 ```
 
 ### Web automation
 
 ```bash
-node agent.js --agent "Navigate to https://example.com and get the page title"
+npx codemode-agent --agent "Navigate to https://example.com and get the page title"
 ```
 
 ### File analysis
 
 ```bash
-node agent.js --agent "Find all JavaScript files and count the lines of code"
+npx codemode-agent --agent "Find all JavaScript files and count the lines of code"
 ```
 
 ## Available Functions
@@ -102,9 +119,9 @@ node agent.js --agent "Find all JavaScript files and count the lines of code"
 
 ## Architecture
 
-1. **agent.js** - Claude agent that uses the execute tool via MCP
-2. **code-mode.js** - MCP server that exposes the execute tool
-3. **cli.js** - CLI entry point that starts the agent
+1. **cli.js** - Unified CLI entry point that routes to agent or MCP mode
+2. **agent.js** - Claude agent that uses the execute tool via MCP
+3. **code-mode.js** - MCP server that exposes the execute tool
 
 The execute tool dynamically generates JavaScript function wrappers for all configured MCP tools and injects them into the execution environment.
 
