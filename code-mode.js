@@ -14,7 +14,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 function loadConfig() {
+  const noMcp = process.argv.includes('--nomcp');
+
+  if (noMcp) {
+    console.error('[Execute Server] --nomcp flag detected, MCP tools disabled');
+    return { mcpServers: {} };
+  }
+
   const paths = [
+    join(process.cwd(), '.codemode.json'),
     join(__dirname, '.codemode.json'),
     join(process.env.HOME || process.env.USERPROFILE || '~', '.claude', '.codemode.json')
   ];
@@ -22,12 +30,148 @@ function loadConfig() {
   for (const configPath of paths) {
     try {
       if (existsSync(configPath)) {
+        console.error(`[Execute Server] Loading config from: ${configPath}`);
         return JSON.parse(readFileSync(configPath, 'utf8'));
       }
-    } catch (error) {}
+    } catch (error) {
+      console.error(`[Execute Server] Failed to load config from ${configPath}:`, error.message);
+    }
   }
 
+  console.error('[Execute Server] No config found, using empty config');
   return { mcpServers: {} };
+}
+
+function getBuiltInToolSchemas() {
+  return [
+    {
+      name: 'Read',
+      description: 'Read file content from the filesystem. Returns file contents with line numbers. Supports reading specific ranges with offset and limit parameters.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file_path: { type: 'string', description: 'Path to the file to read (relative to working directory)' },
+          offset: { type: 'number', description: 'Line number to start reading from (optional)' },
+          limit: { type: 'number', description: 'Number of lines to read (optional, default 2000)' }
+        },
+        required: ['file_path']
+      }
+    },
+    {
+      name: 'Write',
+      description: 'Write content to a file, creating it if it doesn\'t exist or overwriting if it does. Creates parent directories as needed.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file_path: { type: 'string', description: 'Path to the file to write' },
+          content: { type: 'string', description: 'Content to write to the file' }
+        },
+        required: ['file_path', 'content']
+      }
+    },
+    {
+      name: 'Edit',
+      description: 'Edit a file by replacing exact string matches. Can replace first occurrence or all occurrences.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file_path: { type: 'string', description: 'Path to the file to edit' },
+          old_string: { type: 'string', description: 'String to find and replace' },
+          new_string: { type: 'string', description: 'String to replace with' },
+          replace_all: { type: 'boolean', description: 'Replace all occurrences (default: false)' }
+        },
+        required: ['file_path', 'old_string', 'new_string']
+      }
+    },
+    {
+      name: 'Glob',
+      description: 'Find files matching a glob pattern. Returns sorted list of matching files.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Glob pattern (e.g., "**/*.js", "src/**/*.ts")' },
+          path: { type: 'string', description: 'Directory to search in (optional, defaults to working directory)' }
+        },
+        required: ['pattern']
+      }
+    },
+    {
+      name: 'Grep',
+      description: 'Search for patterns in files using ripgrep. Supports regex patterns, file filtering, and various output modes.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Regular expression pattern to search for' },
+          path: { type: 'string', description: 'File or directory to search (default: current directory)' },
+          options: {
+            type: 'object',
+            description: 'Search options: {glob, type, output_mode, "-i", "-n", "-A", "-B", "-C", multiline, head_limit}',
+            properties: {
+              glob: { type: 'string', description: 'File filter pattern' },
+              type: { type: 'string', description: 'File type (js, py, rust, etc)' },
+              output_mode: { type: 'string', description: '"content", "files_with_matches", or "count"' },
+              '-i': { type: 'boolean', description: 'Case insensitive' },
+              '-n': { type: 'boolean', description: 'Show line numbers' },
+              '-A': { type: 'number', description: 'Lines of context after' },
+              '-B': { type: 'number', description: 'Lines of context before' },
+              '-C': { type: 'number', description: 'Lines of context around' },
+              multiline: { type: 'boolean', description: 'Enable multiline matching' },
+              head_limit: { type: 'number', description: 'Limit output lines' }
+            }
+          }
+        },
+        required: ['pattern']
+      }
+    },
+    {
+      name: 'Bash',
+      description: 'Execute shell commands. Supports timeout and captures both stdout and stderr.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Shell command to execute' },
+          description: { type: 'string', description: 'Description of what the command does (optional)' },
+          timeout: { type: 'number', description: 'Timeout in milliseconds (max 600000, default 120000)' }
+        },
+        required: ['command']
+      }
+    },
+    {
+      name: 'LS',
+      description: 'List directory contents with file sizes. Supports hidden files and recursive listing.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Directory path to list (default: current directory)' },
+          show_hidden: { type: 'boolean', description: 'Show hidden files (default: false)' },
+          recursive: { type: 'boolean', description: 'List recursively (default: false)' }
+        },
+        required: []
+      }
+    },
+    {
+      name: 'TodoWrite',
+      description: 'Write todo list to console for task tracking.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            description: 'Array of todo items with {content, status, activeForm}',
+            items: {
+              type: 'object',
+              properties: {
+                content: { type: 'string' },
+                status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+                activeForm: { type: 'string' }
+              }
+            }
+          }
+        },
+        required: ['todos']
+      }
+    }
+  ];
 }
 
 function createToolsModule(workingDirectory) {
@@ -277,12 +421,13 @@ module.exports = { Read, Write, Edit, Glob, Grep, Bash, LS, WebFetch, WebSearch,
 async function generateMCPFunctions() {
   const config = loadConfig();
   let functions = '';
+  const toolDescriptions = {};
 
   for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
     if (serverName === 'codeMode') continue;
 
     try {
-      console.error(`[Execute Server] Generating functions for: ${serverName}`);
+      console.error(`[MCP] Connecting to ${serverName}...`);
 
       const process = spawn(serverConfig.command, serverConfig.args, {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -328,7 +473,20 @@ async function generateMCPFunctions() {
         }) + '\n');
       });
 
+      if (!toolDescriptions[serverName]) {
+        toolDescriptions[serverName] = [];
+      }
+
+      console.error(`[MCP] ✓ ${serverName}: Loaded ${tools.length} tool(s)`);
+
       for (const tool of tools) {
+        toolDescriptions[serverName].push({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema
+        });
+        console.error(`[MCP]    - ${tool.name}`);
+
         const params = tool.inputSchema?.properties || {};
         const required = tool.inputSchema?.required || [];
         const paramNames = Object.keys(params);
@@ -405,16 +563,19 @@ ${validation ? validation + '\n' : ''}  return new Promise((resolve, reject) => 
       }
 
     } catch (error) {
-      console.error(`[Execute Server] Failed to generate functions for ${serverName}:`, error.message);
+      console.error(`[MCP] ✗ ${serverName}: Failed to load - ${error.message}`);
     }
   }
 
-  return functions;
+  console.error(`[MCP] Total tools loaded: ${Object.values(toolDescriptions).reduce((sum, tools) => sum + tools.length, 0)}`);
+  console.error('');
+
+  return { functions, toolDescriptions };
 }
 
 async function executeCode(code, workingDirectory) {
   const toolsModule = createToolsModule(workingDirectory);
-  const mcpFunctions = await generateMCPFunctions();
+  const { functions: mcpFunctions } = await generateMCPFunctions();
 
   const wrappedCode = `
 ${toolsModule}
@@ -464,11 +625,38 @@ const server = new Server(
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
+  const { toolDescriptions } = await generateMCPFunctions();
+  const builtInTools = getBuiltInToolSchemas();
+
+  let builtInToolsList = '\n## Built-in Functions:\n';
+  builtInTools.forEach(tool => {
+    const params = Object.keys(tool.inputSchema?.properties || {})
+      .map(p => tool.inputSchema.required?.includes(p) ? p : `${p}?`)
+      .join(', ');
+    builtInToolsList += `- ${tool.name}(${params}): ${tool.description}\n`;
+  });
+
+  let mcpToolsList = '';
+  if (Object.keys(toolDescriptions).length > 0) {
+    mcpToolsList = '\n\n## MCP Tools by Server:\n';
+    for (const [serverName, tools] of Object.entries(toolDescriptions)) {
+      mcpToolsList += `\n### ${serverName}:\n`;
+      tools.forEach(tool => {
+        const params = Object.keys(tool.inputSchema?.properties || {})
+          .map(p => tool.inputSchema.required?.includes(p) ? p : `${p}?`)
+          .join(', ');
+        mcpToolsList += `- ${tool.name}(${params}): ${tool.description}\n`;
+      });
+    }
+  }
+
+  const description = `Execute JavaScript code with access to file operations, system commands, and MCP tools from configured servers.${builtInToolsList}${mcpToolsList}`;
+
   return {
     tools: [
       {
         name: 'execute',
-        description: 'Execute JavaScript code with access to file operations, system commands, web tools, and MCP tools from configured servers. Built-in functions: Read, Write, Edit, Glob, Grep, Bash, LS, WebFetch, WebSearch, TodoWrite, Task. MCP functions: execute, ast_tool, caveat, browser_* (playwright), search_code (vexify).',
+        description,
         inputSchema: {
           type: 'object',
           properties: {
