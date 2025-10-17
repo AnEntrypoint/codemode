@@ -48,6 +48,17 @@ class MCPServerManager {
   async initialize(config) {
     console.error('[MCP Manager] Initializing persistent MCP servers...');
 
+    // Always add built-in tools server first
+    try {
+      await this.startServer('glootie', {
+        command: 'node',
+        args: [join(__dirname, 'built-in-tools-mcp.js')],
+        cwd: __dirname
+      });
+    } catch (error) {
+      console.error(`[MCP Manager] Failed to start built-in tools:`, error.message);
+    }
+
     for (const [serverName, serverConfig] of Object.entries(config.mcpServers || {})) {
       if (serverName === 'codeMode') continue;
 

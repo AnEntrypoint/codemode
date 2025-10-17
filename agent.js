@@ -114,7 +114,7 @@ try {
   console.log(chalk.yellow('   ⚠ Warning: Failed to load wfgy:'), chalk.gray(error.message));
 }
 
-additionalTools = `\n\n# Additional Tool Documentation\n\n${startMd}\n\n${mcpThorns}\n\n${wfgyHook}`;
+additionalTools = `\n\n# Additional Tool Documentation\n\n${startMd}\n\n${wfgyHook}\n\n`;
 
 console.log(chalk.cyan.bold('2️⃣  Loading MCP Servers'));
 
@@ -199,12 +199,18 @@ Use browser automation, code analysis, and semantic search tools as needed.
 - Show progress with console.log
 - Focus on completing the user's task efficiently
 
+Mandatory: always continuously update and maintain the todo list as a plan to complete the entire requested task, keep working and updating it till the entire task is complete
+
 # Task
 ${task}
 
 # Context
 Working directory: ${process.cwd()}
-Date: ${new Date().toISOString().split('T')[0]}${additionalTools}`;
+Date: ${new Date().toISOString().split('T')[0]}${additionalTools}
+
+# Codebase
+${mcpThorns}
+`;
 
 async function runAgent() {
   try {
@@ -307,6 +313,66 @@ async function runAgent() {
                       console.log(displayKey, chalk.white(String(value)));
                     }
                   }
+                }
+                console.log('');
+              } else if (item.type === 'tool_result') {
+                console.log('');
+                console.log(chalk.green.bold('✓ Tool Result'));
+                console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
+
+                // Extract text content from tool result
+                let resultText = '';
+                if (item.content) {
+                  if (Array.isArray(item.content)) {
+                    resultText = item.content
+                      .filter(c => c.type === 'text')
+                      .map(c => c.text)
+                      .join('\n');
+                  } else if (typeof item.content === 'string') {
+                    resultText = item.content;
+                  } else if (item.content.text) {
+                    resultText = item.content.text;
+                  }
+                }
+
+                // Display full output with no truncation
+                if (resultText) {
+                  console.log(chalk.white(resultText));
+                }
+                console.log('');
+              }
+            });
+          }
+        }
+      } else if (message.type === 'user') {
+        // Handle tool results that come as user messages
+        if (message.message && message.message.content) {
+          const content = message.message.content;
+          if (Array.isArray(content)) {
+            content.forEach(item => {
+              if (item.type === 'tool_result') {
+                console.log('');
+                console.log(chalk.green.bold('✓ Tool Result'));
+                console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
+
+                // Extract text content from tool result
+                let resultText = '';
+                if (item.content) {
+                  if (Array.isArray(item.content)) {
+                    resultText = item.content
+                      .filter(c => c.type === 'text')
+                      .map(c => c.text)
+                      .join('\n');
+                  } else if (typeof item.content === 'string') {
+                    resultText = item.content;
+                  } else if (item.content.text) {
+                    resultText = item.content.text;
+                  }
+                }
+
+                // Display full output with no truncation
+                if (resultText) {
+                  console.log(chalk.white(resultText));
                 }
                 console.log('');
               }
