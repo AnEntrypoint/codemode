@@ -326,12 +326,12 @@ class ExecutionContextManager {
           }).join('\n');
         }
 
-        const argsStr = paramNames.map((p, i) => `${p}: ${safeParamNames[i]}`).join(', ');
-
-        // Generate function that calls MCP tool via IPC
+        // Generate function that calls MCP tool via IPC, filtering out null/undefined values
         functions += `
 global.${tool.name} = ${signature} {
-${validation ? validation + '\n' : ''}  return await global.__callMCPTool('${serverName}', '${tool.name}', { ${argsStr} });
+${validation ? validation + '\n' : ''}  const args = {};
+${paramNames.map((p, i) => `  if (${safeParamNames[i]} !== null && ${safeParamNames[i]} !== undefined) args.${p} = ${safeParamNames[i]};`).join('\n')}
+  return await global.__callMCPTool('${serverName}', '${tool.name}', args);
 };
 
 `;
