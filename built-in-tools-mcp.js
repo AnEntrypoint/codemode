@@ -154,18 +154,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'WebSearch',
-        description: 'Search the web using DuckDuckGo. Returns search results with titles, URLs, and descriptions. Note: May return empty results due to rate limiting or bot detection.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            query: { type: 'string', description: 'Search query string' },
-            num_results: { type: 'number', description: 'Number of results to return (default: 10)' }
-          },
-          required: ['query']
-        }
-      },
-      {
         name: 'WebFetch',
         description: 'Fetch a webpage and extract readable plain text content using Mozilla Readability. Returns article title, byline, excerpt, and clean text content.',
         inputSchema: {
@@ -210,9 +198,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case 'TodoWrite':
         result = await handleTodoWrite(args);
-        break;
-      case 'WebSearch':
-        result = await handleWebSearch(args);
         break;
       case 'WebFetch':
         result = await handleWebFetch(args);
@@ -501,60 +486,6 @@ async function handleLS(args) {
 async function handleTodoWrite(args) {
   const { todos } = args;
   return `TodoWrite: ${JSON.stringify(todos, null, 2)}`;
-}
-
-async function handleWebSearch(args) {
-  const { query, num_results = 10 } = args;
-
-  try {
-    const encodedQuery = encodeURIComponent(query);
-    const url = `https://html.duckduckgo.com/html/?q=${encodedQuery}`;
-
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
-
-    if (!response.ok) {
-      return `WebSearch error: HTTP ${response.status}: ${response.statusText}`;
-    }
-
-    const html = await response.text();
-    const dom = new JSDOM(html);
-    const document = dom.window.document;
-
-    const results = [];
-    const resultElements = document.querySelectorAll('.result');
-
-    for (let i = 0; i < Math.min(resultElements.length, num_results); i++) {
-      const element = resultElements[i];
-      const titleEl = element.querySelector('.result__title');
-      const linkEl = element.querySelector('.result__url');
-      const snippetEl = element.querySelector('.result__snippet');
-
-      if (titleEl && linkEl) {
-        results.push({
-          title: titleEl.textContent.trim(),
-          url: linkEl.textContent.trim(),
-          description: snippetEl ? snippetEl.textContent.trim() : 'N/A'
-        });
-      }
-    }
-
-    if (results.length === 0) {
-      return `WebSearch: No results found for query "${query}". The search may be rate-limited or blocked.`;
-    }
-
-    const formatted = results.map((result, index) => {
-      return `[${index + 1}] ${result.title}\n    URL: ${result.url}\n    Description: ${result.description}`;
-    }).join('\n\n');
-
-    return `WebSearch Results for "${query}":\n\n${formatted}`;
-
-  } catch (error) {
-    return `WebSearch error: ${error.message}`;
-  }
 }
 
 async function handleWebFetch(args) {
