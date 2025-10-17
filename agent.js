@@ -69,7 +69,7 @@ if (!isAgentMode) {
 }
 
 const taskIndex = args.indexOf('--agent') + 1;
-const task = taskIndex < args.length ? args.slice(taskIndex).join(' ') : 'Help me with this codebase';
+const task = taskIndex < args.length ? args.slice(taskIndex).join(' ') : 'Clean up this codebase';
 
 console.log('');
 console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
@@ -159,7 +159,7 @@ console.log('');
 
 const agentPrompt = `You are an AI assistant with access to an execute tool that allows you to run JavaScript code programmatically.
 
-# Available Functions via Execute Tool
+# Execute Tool - persistent-context real time repl interface with extra tools
 
 The execute tool provides these functions that you can call in your JavaScript code:
 

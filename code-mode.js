@@ -3,19 +3,16 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { spawn } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs';
-import { join, resolve, dirname, basename, delimiter } from 'path';
-import { tmpdir } from 'os';
+import { spawn, fork } from 'child_process';
+import { existsSync, readFileSync } from 'fs';
+import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import fg from 'fast-glob';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 function loadConfig() {
   const noMcp = process.argv.includes('--nomcp');
-
   if (noMcp) {
     console.error('[Execute Server] --nomcp flag detected, MCP tools disabled');
     return { mcpServers: {} };
@@ -42,452 +39,260 @@ function loadConfig() {
   return { mcpServers: {} };
 }
 
-// Removed getBuiltInToolSchemas - tools now come from builtInTools MCP server
-function _removed_getBuiltInToolSchemas() {
-  return [
-    {
-      name: 'Read',
-      description: 'Read file content from the filesystem. Returns file contents with line numbers. Supports reading specific ranges with offset and limit parameters.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          file_path: { type: 'string', description: 'Path to the file to read (relative to working directory)' },
-          offset: { type: 'number', description: 'Line number to start reading from (optional)' },
-          limit: { type: 'number', description: 'Number of lines to read (optional, default 2000)' }
-        },
-        required: ['file_path']
+// Global MCP Server Manager with persistent connections
+class MCPServerManager {
+  constructor() {
+    this.servers = new Map();
+  }
+
+  async initialize(config) {
+    console.error('[MCP Manager] Initializing persistent MCP servers...');
+
+    for (const [serverName, serverConfig] of Object.entries(config.mcpServers || {})) {
+      if (serverName === 'codeMode') continue;
+
+      try {
+        await this.startServer(serverName, serverConfig);
+      } catch (error) {
+        console.error(`[MCP Manager] Failed to start ${serverName}:`, error.message);
       }
-    },
-    {
-      name: 'Write',
-      description: 'Write content to a file, creating it if it doesn\'t exist or overwriting if it does. Creates parent directories as needed.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          file_path: { type: 'string', description: 'Path to the file to write' },
-          content: { type: 'string', description: 'Content to write to the file' }
-        },
-        required: ['file_path', 'content']
-      }
-    },
-    {
-      name: 'Edit',
-      description: 'Edit a file by replacing exact string matches. Can replace first occurrence or all occurrences.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          file_path: { type: 'string', description: 'Path to the file to edit' },
-          old_string: { type: 'string', description: 'String to find and replace' },
-          new_string: { type: 'string', description: 'String to replace with' },
-          replace_all: { type: 'boolean', description: 'Replace all occurrences (default: false)' }
-        },
-        required: ['file_path', 'old_string', 'new_string']
-      }
-    },
-    {
-      name: 'Glob',
-      description: 'Find files matching a glob pattern. Returns sorted list of matching files.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          pattern: { type: 'string', description: 'Glob pattern (e.g., "**/*.js", "src/**/*.ts")' },
-          path: { type: 'string', description: 'Directory to search in (optional, defaults to working directory)' }
-        },
-        required: ['pattern']
-      }
-    },
-    {
-      name: 'Grep',
-      description: 'Search for patterns in files using ripgrep. Supports regex patterns, file filtering, and various output modes.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          pattern: { type: 'string', description: 'Regular expression pattern to search for' },
-          path: { type: 'string', description: 'File or directory to search (default: current directory)' },
-          options: {
-            type: 'object',
-            description: 'Search options: {glob, type, output_mode, "-i", "-n", "-A", "-B", "-C", multiline, head_limit}',
-            properties: {
-              glob: { type: 'string', description: 'File filter pattern' },
-              type: { type: 'string', description: 'File type (js, py, rust, etc)' },
-              output_mode: { type: 'string', description: '"content", "files_with_matches", or "count"' },
-              '-i': { type: 'boolean', description: 'Case insensitive' },
-              '-n': { type: 'boolean', description: 'Show line numbers' },
-              '-A': { type: 'number', description: 'Lines of context after' },
-              '-B': { type: 'number', description: 'Lines of context before' },
-              '-C': { type: 'number', description: 'Lines of context around' },
-              multiline: { type: 'boolean', description: 'Enable multiline matching' },
-              head_limit: { type: 'number', description: 'Limit output lines' }
-            }
-          }
-        },
-        required: ['pattern']
-      }
-    },
-    {
-      name: 'Bash',
-      description: 'Execute shell commands. Supports timeout and captures both stdout and stderr.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          command: { type: 'string', description: 'Shell command to execute' },
-          description: { type: 'string', description: 'Description of what the command does (optional)' },
-          timeout: { type: 'number', description: 'Timeout in milliseconds (max 600000, default 120000)' }
-        },
-        required: ['command']
-      }
-    },
-    {
-      name: 'LS',
-      description: 'List directory contents with file sizes. Supports hidden files and recursive listing.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: 'Directory path to list (default: current directory)' },
-          show_hidden: { type: 'boolean', description: 'Show hidden files (default: false)' },
-          recursive: { type: 'boolean', description: 'List recursively (default: false)' }
-        },
-        required: []
-      }
-    },
-    {
-      name: 'TodoWrite',
-      description: 'Write todo list to console for task tracking.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          todos: {
-            type: 'array',
-            description: 'Array of todo items with {content, status, activeForm}',
-            items: {
-              type: 'object',
-              properties: {
-                content: { type: 'string' },
-                status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
-                activeForm: { type: 'string' }
+    }
+
+    console.error('[MCP Manager] Initialization complete');
+  }
+
+  async startServer(serverName, serverConfig) {
+    console.error(`[MCP Manager] Starting ${serverName}...`);
+
+    const proc = spawn(serverConfig.command, serverConfig.args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: __dirname
+    });
+
+    const serverState = {
+      process: proc,
+      tools: [],
+      nextId: 0,
+      buffer: '',
+      pendingCalls: new Map()
+    };
+
+    this.servers.set(serverName, serverState);
+
+    proc.stdout.on('data', (data) => {
+      serverState.buffer += data.toString();
+      const lines = serverState.buffer.split('\n');
+      serverState.buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const response = JSON.parse(line);
+            if (serverState.pendingCalls.has(response.id)) {
+              const { resolve, reject } = serverState.pendingCalls.get(response.id);
+              serverState.pendingCalls.delete(response.id);
+
+              if (response.error) {
+                reject(new Error(response.error.message || JSON.stringify(response.error)));
+              } else {
+                resolve(response.result);
               }
             }
-          }
-        },
-        required: ['todos']
-      }
-    }
-  ];
-}
-
-// Removed createToolsModule - tools now come from builtInTools MCP server
-function _removed_createToolsModule(workingDirectory) {
-  return `
-const { spawn } = require('child_process');
-const { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } = require('fs');
-const { join, resolve, dirname, basename } = require('path');
-
-const Read = (file_path, offset, limit) => {
-  const absPath = resolve('${workingDirectory}', file_path);
-  if (!existsSync(absPath)) {
-    throw new Error(\`File not found: \${absPath}\`);
-  }
-  let content = readFileSync(absPath, 'utf8');
-  if (content === '') {
-    return \`<system-reminder>File exists but has empty contents: \${absPath}</system-reminder>\`;
-  }
-  const lines = content.split('\\n');
-  const start = offset || 0;
-  const defaultLimit = 2000;
-  const end = limit ? start + limit : Math.min(start + defaultLimit, lines.length);
-  const selectedLines = lines.slice(start, end);
-  const numberedLines = selectedLines.map((line, index) => {
-    const lineNum = start + index + 1;
-    const truncatedLine = line.length > 2000 ? line.substring(0, 2000) : line;
-    return \`\${lineNum.toString().padStart(5)}→\${truncatedLine}\`;
-  });
-  let result = numberedLines.join('\\n');
-  if (result.length > 30000) {
-    result = result.substring(0, 30000);
-  }
-  return result;
-};
-
-const Write = (file_path, content) => {
-  const absPath = resolve('${workingDirectory}', file_path);
-  const fileExists = existsSync(absPath);
-  if (fileExists) {
-    const existingContent = readFileSync(absPath, 'utf8');
-    if (existingContent === content) {
-      return \`File unchanged: \${absPath} (content is identical)\`;
-    }
-  }
-  const dir = dirname(absPath);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  writeFileSync(absPath, content, 'utf8');
-  const action = fileExists ? 'overwrote' : 'created';
-  return \`Successfully \${action} file: \${absPath}\`;
-};
-
-const Edit = (file_path, old_string, new_string, replace_all = false) => {
-  const absPath = resolve('${workingDirectory}', file_path);
-  if (!existsSync(absPath)) {
-    throw new Error(\`File not found: \${absPath}\`);
-  }
-  if (old_string === new_string) {
-    return 'No changes made: old_string and new_string are identical';
-  }
-  let content = readFileSync(absPath, 'utf8');
-  const originalContent = content;
-  if (replace_all) {
-    if (!content.includes(old_string)) {
-      throw new Error(\`String not found in file: \${old_string}\`);
-    }
-    content = content.split(old_string).join(new_string);
-  } else {
-    const index = content.indexOf(old_string);
-    if (index === -1) {
-      throw new Error(\`String not found in file: \${old_string}\`);
-    }
-    content = content.substring(0, index) + new_string + content.substring(index + old_string.length);
-  }
-  if (content !== originalContent) {
-    writeFileSync(absPath, content, 'utf8');
-  }
-  const action = replace_all ? 'replaced all occurrences' : 'replaced';
-  return \`Successfully \${action} in file: \${absPath}\`;
-};
-
-const Glob = async (pattern, path) => {
-  const Module = require('module');
-  const originalResolve = Module._resolveFilename;
-  Module._resolveFilename = function(request, parent) {
-    if (request === 'fast-glob') {
-      return '${__dirname}/node_modules/fast-glob/out/index.js';
-    }
-    return originalResolve.apply(this, arguments);
-  };
-  const fg = require('fast-glob');
-
-  const cwd = path ? resolve('${workingDirectory}', path) : '${workingDirectory}';
-  const files = await fg(pattern, {
-    cwd,
-    absolute: false,
-    dot: true,
-    onlyFiles: true,
-    stats: true
-  });
-  const sortedFiles = files
-    .sort((a, b) => b.stats.mtimeMs - a.stats.mtimeMs)
-    .map(entry => typeof entry === 'string' ? entry : entry.path);
-  let result = sortedFiles.length > 0 ? sortedFiles.join('\\n') : 'No files matched';
-  if (result.length > 30000) {
-    result = result.substring(0, 30000);
-  }
-  return result;
-};
-
-const Grep = (pattern, path = '.', options = {}) => {
-  return new Promise((resolve, reject) => {
-    const searchPath = require('path').resolve('${workingDirectory}', path);
-    const rgArgs = [pattern, searchPath];
-    if (options.glob) rgArgs.push('--glob', options.glob);
-    if (options.type) rgArgs.push('--type', options.type);
-    if (options['-i']) rgArgs.push('--ignore-case');
-    if (options['-n']) rgArgs.push('--line-number');
-    if (options.multiline) rgArgs.push('--multiline');
-    if (options['-B']) rgArgs.push('--before-context', options['-B'].toString());
-    if (options['-A']) rgArgs.push('--after-context', options['-A'].toString());
-    if (options['-C']) rgArgs.push('--context', options['-C'].toString());
-    const output_mode = options.output_mode || 'files_with_matches';
-    if (output_mode === 'files_with_matches') {
-      rgArgs.push('--files-with-matches');
-    } else if (output_mode === 'count') {
-      rgArgs.push('--count');
-    }
-    const child = spawn('rg', rgArgs);
-    let output = '';
-    let errorOutput = '';
-    child.stdout.on('data', (data) => { output += data.toString(); });
-    child.stderr.on('data', (data) => { errorOutput += data.toString(); });
-    child.on('close', (code) => {
-      if (code !== 0 && errorOutput && !errorOutput.includes('No matches found')) {
-        reject(new Error(\`Grep search error: \${errorOutput}\`));
-        return;
-      }
-      let result = output.trim();
-      if (options.head_limit) {
-        const lines = result.split('\\n');
-        result = lines.slice(0, options.head_limit).join('\\n');
-      }
-      if (result.length > 30000) {
-        result = result.substring(0, 30000);
-      }
-      resolve(result || 'No matches found');
-    });
-  });
-};
-
-const Bash = (command, description, timeout = 120000) => {
-  return new Promise((resolve, reject) => {
-    if (timeout > 600000) {
-      reject(new Error('Timeout cannot exceed 600000ms (10 minutes)'));
-      return;
-    }
-    if (command.includes('rm -rf /') || command.includes('sudo rm')) {
-      reject(new Error('Dangerous command detected'));
-      return;
-    }
-    const child = spawn(command, [], {
-      shell: true,
-      timeout,
-      cwd: '${workingDirectory}',
-      env: { ...process.env, TERM: 'xterm-256color' }
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (data) => { stdout += data.toString(); });
-    child.stderr.on('data', (data) => { stderr += data.toString(); });
-    child.on('close', (code) => {
-      let output = stdout || stderr;
-      const prefix = description ? \`[\${description}] \` : '';
-      if (output.length > 30000) {
-        output = output.substring(0, 30000);
-      }
-      if (code === 0) {
-        resolve(\`\${prefix}\${output}\`);
-      } else {
-        reject(new Error(\`\${prefix}\${output}\`));
+          } catch (e) {}
+        }
       }
     });
-    child.on('error', (error) => {
-      reject(new Error(\`Command execution error: \${error.message}\`));
+
+    proc.stderr.on('data', () => {});
+    proc.on('error', (err) => console.error(`[MCP Manager] ${serverName} error:`, err.message));
+    proc.on('close', () => {
+      console.error(`[MCP Manager] ${serverName} closed`);
+      this.servers.delete(serverName);
     });
-  });
-};
 
-const LS = (path = '.', show_hidden = false, recursive = false) => {
-  const absPath = resolve('${workingDirectory}', path);
-  if (!existsSync(absPath)) {
-    throw new Error(\`Path not found: \${absPath}\`);
-  }
-  const stats = statSync(absPath);
-  if (!stats.isDirectory()) {
-    return \`\${basename(absPath)} (\${stats.size} bytes)\`;
-  }
-  function listDirectory(dirPath, prefix = '') {
-    const entries = readdirSync(dirPath);
-    const result = [];
-    for (const entry of entries) {
-      if (!show_hidden && entry.startsWith('.')) {
-        continue;
+    await this.sendRequest(serverName, {
+      jsonrpc: '2.0',
+      id: serverState.nextId++,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'codemode-agent', version: '1.0.0' }
       }
-      const fullPath = join(dirPath, entry);
-      const stats = statSync(fullPath);
-      const isDir = stats.isDirectory();
-      const size = isDir ? '' : \` (\${stats.size} bytes)\`;
-      const type = isDir ? '/' : '';
-      result.push(\`\${prefix}\${entry}\${type}\${size}\`);
-      if (recursive && isDir) {
-        result.push(...listDirectory(fullPath, prefix + '  '));
-      }
-    }
-    return result;
+    });
+
+    const toolsResult = await this.sendRequest(serverName, {
+      jsonrpc: '2.0',
+      id: serverState.nextId++,
+      method: 'tools/list'
+    });
+
+    serverState.tools = toolsResult.tools || [];
+
+    console.error(`[MCP Manager] ✓ ${serverName}: ${serverState.tools.length} tool(s) loaded`);
+    serverState.tools.forEach(tool => console.error(`[MCP Manager]    - ${tool.name}`));
   }
-  const listing = listDirectory(absPath);
-  let result = listing.length > 0 ? listing.join('\\n') : 'Empty directory';
-  if (result.length > 30000) {
-    result = result.substring(0, 30000);
-  }
-  return result;
-};
 
-const WebFetch = async (url, prompt) => {
-  throw new Error('WebFetch not implemented in execute context');
-};
+  async sendRequest(serverName, request) {
+    const serverState = this.servers.get(serverName);
+    if (!serverState) throw new Error(`MCP server ${serverName} not found`);
 
-const WebSearch = async (query, allowed_domains, blocked_domains) => {
-  throw new Error('WebSearch not implemented in execute context');
-};
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        serverState.pendingCalls.delete(request.id);
+        reject(new Error(`MCP request timeout for ${serverName}`));
+      }, 60000);
 
-const TodoWrite = async (todos) => {
-  console.log('TodoWrite:', JSON.stringify(todos, null, 2));
-  return 'TodoWrite logged to console';
-};
-
-const Task = async (description, prompt, subagent_type) => {
-  throw new Error('Task not implemented in execute context');
-};
-
-module.exports = { Read, Write, Edit, Glob, Grep, Bash, LS, WebFetch, WebSearch, TodoWrite, Task };
-`;
-}
-
-async function generateMCPFunctions() {
-  const config = loadConfig();
-  let functions = '';
-  const toolDescriptions = {};
-
-  for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
-    if (serverName === 'codeMode') continue;
-
-    try {
-      console.error(`[MCP] Connecting to ${serverName}...`);
-
-      const process = spawn(serverConfig.command, serverConfig.args, {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: __dirname
+      serverState.pendingCalls.set(request.id, {
+        resolve: (result) => { clearTimeout(timeout); resolve(result); },
+        reject: (error) => { clearTimeout(timeout); reject(error); }
       });
 
-      let buffer = '';
-      const tools = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          process.kill();
-          reject(new Error(`Timeout connecting to ${serverName}`));
-        }, 30000);
+      serverState.process.stdin.write(JSON.stringify(request) + '\n');
+    });
+  }
 
-        process.stdout.on('data', (data) => {
-          buffer += data.toString();
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+  async callTool(serverName, toolName, args) {
+    const serverState = this.servers.get(serverName);
+    if (!serverState) throw new Error(`MCP server ${serverName} not found`);
 
-          for (const line of lines) {
-            if (line.trim()) {
-              try {
-                const response = JSON.parse(line);
-                if (response.id === 1) {
-                  clearTimeout(timeout);
-                  process.kill();
-                  resolve(response.result?.tools || []);
-                }
-              } catch (e) {}
-            }
-          }
-        });
+    const result = await this.sendRequest(serverName, {
+      jsonrpc: '2.0',
+      id: serverState.nextId++,
+      method: 'tools/call',
+      params: { name: toolName, arguments: args }
+    });
 
-        process.stderr.on('data', () => {});
+    const content = result.content;
+    if (Array.isArray(content) && content[0]?.type === 'text') {
+      return content[0].text;
+    }
+    return JSON.stringify(result);
+  }
 
-        process.on('close', () => {
-          clearTimeout(timeout);
-        });
+  getAllTools() {
+    const allTools = {};
+    for (const [serverName, serverState] of this.servers) {
+      allTools[serverName] = serverState.tools;
+    }
+    return allTools;
+  }
 
-        process.stdin.write(JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/list'
-        }) + '\n');
-      });
+  shutdown() {
+    for (const [serverName, serverState] of this.servers) {
+      console.error(`[MCP Manager] Shutting down ${serverName}`);
+      serverState.process.kill();
+    }
+    this.servers.clear();
+  }
+}
 
-      if (!toolDescriptions[serverName]) {
-        toolDescriptions[serverName] = [];
+// Persistent Execution Context Manager
+class ExecutionContextManager {
+  constructor(mcpManager) {
+    this.mcpManager = mcpManager;
+    this.worker = null;
+    this.nextId = 0;
+    this.pendingExecutions = new Map();
+    this.initialized = false;
+  }
+
+  async initialize() {
+    console.error('[Execution Context] Creating persistent Node.js worker with IPC...');
+
+    this.worker = fork(join(__dirname, 'execution-worker.js'), [], {
+      stdio: ['inherit', 'inherit', 'inherit', 'ipc']
+    });
+
+    // Handle IPC messages from worker
+    this.worker.on('message', async (msg) => {
+      if (msg.type === 'MCP_CALL') {
+        // Worker is calling an MCP tool
+        const { callId, serverName, toolName, args } = msg;
+
+        try {
+          const result = await this.mcpManager.callTool(serverName, toolName, args);
+          this.worker.send({
+            type: 'MCP_RESULT',
+            callId,
+            success: true,
+            result
+          });
+        } catch (error) {
+          this.worker.send({
+            type: 'MCP_RESULT',
+            callId,
+            success: false,
+            result: error.message
+          });
+        }
+      } else if (msg.type === 'EXEC_RESULT') {
+        // Execution completed
+        const { execId, success, output, error } = msg;
+
+        if (this.pendingExecutions.has(execId)) {
+          const { resolve } = this.pendingExecutions.get(execId);
+          this.pendingExecutions.delete(execId);
+          resolve({ success, output: success ? output : error });
+        }
+      } else if (msg.type === 'INIT_COMPLETE') {
+        this.initialized = true;
+        console.error('[Execution Context] Worker initialized');
       }
+    });
 
-      console.error(`[MCP] ✓ ${serverName}: Loaded ${tools.length} tool(s)`);
+    this.worker.on('error', (err) => {
+      console.error('[Execution Context] Worker error:', err.message);
+    });
 
-      for (const tool of tools) {
+    this.worker.on('exit', (code) => {
+      console.error(`[Execution Context] Worker exited with code ${code}`);
+      this.worker = null;
+      this.initialized = false;
+    });
+
+    // Send tool functions to worker
+    const { functions } = this.generateMCPFunctions();
+
+    this.worker.send({
+      type: 'INIT_TOOLS',
+      toolFunctions: functions
+    });
+
+    // Wait for initialization
+    await new Promise((resolve) => {
+      const check = setInterval(() => {
+        if (this.initialized) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 100);
+    });
+  }
+
+  getAllToolNames() {
+    const names = {};
+    for (const [serverName, serverState] of this.mcpManager.servers) {
+      for (const tool of serverState.tools) {
+        names[tool.name] = true;
+      }
+    }
+    return names;
+  }
+
+  generateMCPFunctions() {
+    let functions = '';
+    const toolDescriptions = {};
+
+    for (const [serverName, serverState] of this.mcpManager.servers) {
+      toolDescriptions[serverName] = [];
+
+      for (const tool of serverState.tools) {
         toolDescriptions[serverName].push({
           name: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema
         });
-        console.error(`[MCP]    - ${tool.name}`);
 
         const params = tool.inputSchema?.properties || {};
         const required = tool.inputSchema?.required || [];
@@ -506,169 +311,86 @@ async function generateMCPFunctions() {
           validation = required.map(p => {
             const idx = paramNames.indexOf(p);
             const safeName = safeParamNames[idx];
-            return `  if (${safeName} === null) throw new Error('Missing required parameter: ${p}');`;
+            return `  if (${safeName} === null || ${safeName} === undefined) throw new Error('Missing required parameter: ${p}');`;
           }).join('\n');
         }
 
-        const argsObject = paramNames.map((p, i) => `${p}: ${safeParamNames[i]}`).join(', ');
+        const argsStr = paramNames.map((p, i) => `${p}: ${safeParamNames[i]}`).join(', ');
 
+        // Generate function that calls MCP tool via IPC
         functions += `
-${signature} {
-${validation ? validation + '\n' : ''}  return new Promise((resolve, reject) => {
-    const { spawn } = require('child_process');
-    const proc = spawn('${serverConfig.command}', ${JSON.stringify(serverConfig.args)}, {
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-
-    const timeout = setTimeout(() => {
-      proc.kill();
-      reject(new Error('MCP call timeout after 60s'));
-    }, 60000);
-
-    let buffer = '';
-    let initialized = false;
-
-    proc.stdout.on('data', (data) => {
-      buffer += data.toString();
-      const lines = buffer.split('\\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const response = JSON.parse(line);
-
-            // Handle initialization response
-            if (response.id === 0 && !initialized) {
-              initialized = true;
-              // Send tool call after initialization
-              proc.stdin.write(JSON.stringify({
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'tools/call',
-                params: {
-                  name: '${tool.name}',
-                  arguments: { ${argsObject} }
-                }
-              }) + '\\n');
-            }
-
-            // Handle tool call response
-            if (response.id === 1) {
-              clearTimeout(timeout);
-              proc.kill();
-              if (response.error) {
-                reject(new Error(response.error.message || JSON.stringify(response.error)));
-              } else {
-                const content = response.result?.content;
-                if (Array.isArray(content) && content[0]?.type === 'text') {
-                  resolve(content[0].text);
-                } else {
-                  resolve(JSON.stringify(response.result));
-                }
-              }
-              return;
-            }
-          } catch (e) {}
-        }
-      }
-    });
-
-    proc.stderr.on('data', () => {});
-
-    proc.on('close', (code) => {
-      clearTimeout(timeout);
-      if (!initialized) {
-        reject(new Error('MCP server closed before initialization'));
-      }
-    });
-
-    proc.on('error', (err) => {
-      clearTimeout(timeout);
-      reject(new Error('MCP server error: ' + err.message));
-    });
-
-    // Send initialize first
-    proc.stdin.write(JSON.stringify({
-      jsonrpc: '2.0',
-      id: 0,
-      method: 'initialize',
-      params: {
-        protocolVersion: '2024-11-05',
-        capabilities: {},
-        clientInfo: {
-          name: 'codemode-agent',
-          version: '1.0.0'
-        }
-      }
-    }) + '\\n');
-  });
-}
+global.${tool.name} = ${signature} {
+${validation ? validation + '\n' : ''}  return await global.__callMCPTool('${serverName}', '${tool.name}', { ${argsStr} });
+};
 
 `;
       }
+    }
 
-    } catch (error) {
-      console.error(`[MCP] ✗ ${serverName}: Failed to load - ${error.message}`);
+    return { functions, toolDescriptions };
+  }
+
+  async execute(code, workingDirectory) {
+    if (!this.worker || !this.initialized) {
+      throw new Error('Execution worker not initialized');
+    }
+
+    const execId = this.nextId++;
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingExecutions.delete(execId);
+        reject(new Error('Execution timeout'));
+      }, 120000);
+
+      this.pendingExecutions.set(execId, {
+        resolve: (result) => {
+          clearTimeout(timeout);
+          resolve(result);
+        }
+      });
+
+      this.worker.send({
+        type: 'EXECUTE',
+        execId,
+        code,
+        workingDirectory
+      });
+    });
+  }
+
+  clearContext() {
+    if (this.worker && this.initialized) {
+      this.worker.send({
+        type: 'EXECUTE',
+        execId: -1, // Special ID for clear_context
+        code: 'clear_context()',
+        workingDirectory: process.cwd()
+      });
     }
   }
 
-  console.error(`[MCP] Total tools loaded: ${Object.values(toolDescriptions).reduce((sum, tools) => sum + tools.length, 0)}`);
-  console.error('');
-
-  return { functions, toolDescriptions };
+  shutdown() {
+    if (this.worker) {
+      console.error('[Execution Context] Shutting down worker');
+      this.worker.kill();
+      this.worker = null;
+    }
+  }
 }
 
-async function executeCode(code, workingDirectory) {
-  const { functions: mcpFunctions } = await generateMCPFunctions();
-
-  const wrappedCode = `
-${mcpFunctions}
-
-(async () => {
-  ${code}
-})().then(() => process.exit(0)).catch(err => { console.error(err.message); process.exit(1); });
-`;
-
-  return new Promise((resolve, reject) => {
-    const proc = spawn('node', [], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: workingDirectory
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr.on('data', (data) => { stderr += data.toString(); });
-
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve({ success: true, output: stdout });
-      } else {
-        resolve({ success: false, error: stderr || stdout });
-      }
-    });
-
-    proc.stdin.write(wrappedCode);
-    proc.stdin.end();
-  });
-}
+const mcpManager = new MCPServerManager();
+let executionContext = null;
 
 const server = new Server(
-  {
-    name: 'codemode-execute',
-    version: '1.0.0',
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
+  { name: 'codemode-execute', version: '1.0.0' },
+  { capabilities: { tools: {} } }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const { toolDescriptions } = await generateMCPFunctions();
+  if (!executionContext) return { tools: [] };
+
+  const { toolDescriptions } = executionContext.generateMCPFunctions();
 
   let mcpToolsList = '';
   if (Object.keys(toolDescriptions).length > 0) {
@@ -684,7 +406,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     }
   }
 
-  const description = `Execute JavaScript code with access to all MCP tools from configured servers.${mcpToolsList}`;
+  const description = `Execute JavaScript code with access to all MCP tools. Both MCP connections and execution context persist across calls - use clear_context() to reset.${mcpToolsList}\n\n**Special Functions:**\n- clear_context(): Clear all variables and state in the execution context`;
 
   return {
     tools: [
@@ -700,7 +422,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             code: {
               type: 'string',
-              description: 'JavaScript code to execute with MCP tool functions available'
+              description: 'JavaScript code to execute. Context persists between calls.'
             }
           },
           required: ['workingDirectory', 'code']
@@ -715,10 +437,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   if (name !== 'execute') {
     return {
-      content: [{
-        type: 'text',
-        text: `Unknown tool: ${name}`
-      }],
+      content: [{ type: 'text', text: `Unknown tool: ${name}` }],
       isError: true
     };
   }
@@ -735,42 +454,53 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       throw new Error(`Working directory does not exist: ${absWorkingDir}`);
     }
 
-    const result = await executeCode(code, absWorkingDir);
+    const result = await executionContext.execute(code, absWorkingDir);
 
     if (result.success) {
       return {
-        content: [{
-          type: 'text',
-          text: result.output || 'Code executed successfully'
-        }]
+        content: [{ type: 'text', text: result.output || 'Code executed successfully' }]
       };
     } else {
       return {
-        content: [{
-          type: 'text',
-          text: `Error: ${result.error}`
-        }],
+        content: [{ type: 'text', text: `Error: ${result.error}` }],
         isError: true
       };
     }
   } catch (error) {
     return {
-      content: [{
-        type: 'text',
-        text: `Error: ${error.message}`
-      }],
+      content: [{ type: 'text', text: `Error: ${error.message}` }],
       isError: true
     };
   }
 });
 
 async function main() {
+  const config = loadConfig();
+
+  // Initialize persistent MCP servers
+  await mcpManager.initialize(config);
+
+  // Initialize persistent execution context
+  executionContext = new ExecutionContextManager(mcpManager);
+  await executionContext.initialize();
+
+  // Handle shutdown
+  const shutdown = () => {
+    console.error('[Execute Server] Shutting down...');
+    executionContext.shutdown();
+    mcpManager.shutdown();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('CodeMode Execute MCP Server running on stdio');
+  console.error('CodeMode Execute MCP Server running with persistent context');
 }
 
-main().catch((error) => {
-  console.error('Server error:', error);
+main().catch(err => {
+  console.error('Fatal error:', err);
   process.exit(1);
 });
