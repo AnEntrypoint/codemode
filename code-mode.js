@@ -518,19 +518,45 @@ ${validation ? validation + '\n' : ''}  return new Promise((resolve, reject) => 
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
-    let output = '';
-    proc.stdout.on('data', (data) => { output += data.toString(); });
-    proc.stderr.on('data', () => {});
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error('MCP call timeout after 60s'));
+    }, 60000);
 
-    proc.on('close', (code) => {
-      const lines = output.split('\\n');
+    let buffer = '';
+    let initialized = false;
+
+    proc.stdout.on('data', (data) => {
+      buffer += data.toString();
+      const lines = buffer.split('\\n');
+      buffer = lines.pop() || '';
+
       for (const line of lines) {
         if (line.trim()) {
           try {
             const response = JSON.parse(line);
+
+            // Handle initialization response
+            if (response.id === 0 && !initialized) {
+              initialized = true;
+              // Send tool call after initialization
+              proc.stdin.write(JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'tools/call',
+                params: {
+                  name: '${tool.name}',
+                  arguments: { ${argsObject} }
+                }
+              }) + '\\n');
+            }
+
+            // Handle tool call response
             if (response.id === 1) {
+              clearTimeout(timeout);
+              proc.kill();
               if (response.error) {
-                reject(new Error(response.error.message));
+                reject(new Error(response.error.message || JSON.stringify(response.error)));
               } else {
                 const content = response.result?.content;
                 if (Array.isArray(content) && content[0]?.type === 'text') {
@@ -544,16 +570,34 @@ ${validation ? validation + '\n' : ''}  return new Promise((resolve, reject) => 
           } catch (e) {}
         }
       }
-      reject(new Error('No valid response from MCP server'));
     });
 
+    proc.stderr.on('data', () => {});
+
+    proc.on('close', (code) => {
+      clearTimeout(timeout);
+      if (!initialized) {
+        reject(new Error('MCP server closed before initialization'));
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(new Error('MCP server error: ' + err.message));
+    });
+
+    // Send initialize first
     proc.stdin.write(JSON.stringify({
       jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
+      id: 0,
+      method: 'initialize',
       params: {
-        name: '${tool.name}',
-        arguments: { ${argsObject} }
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: {
+          name: 'codemode-agent',
+          version: '1.0.0'
+        }
       }
     }) + '\\n');
   });
