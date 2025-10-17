@@ -290,7 +290,7 @@ async function runAgent() {
                     const displayKey = chalk.cyan(`${key}:`);
                     if (typeof value === 'string') {
                       if (value.length > 200) {
-                        console.log(displayKey, chalk.white(value.substring(0, 200) + '...'));
+                        console.log(displayKey, chalk.white(value));
                         console.log(chalk.gray(`          (${value.length} characters total)`));
                       } else if (value.includes('\n')) {
                         console.log(displayKey);
@@ -298,9 +298,6 @@ async function runAgent() {
                         lines.forEach(line => {
                           console.log(chalk.gray('          ') + chalk.white(line));
                         });
-                        if (lines.length > 10) {
-                          console.log(chalk.gray(`          ... ${lines.length - 10} more lines`));
-                        }
                       } else {
                         console.log(displayKey, chalk.white(value));
                       }
