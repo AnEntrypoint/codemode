@@ -91,26 +91,38 @@ process.on('message', (msg) => {
     // Initialize MCP tool functions
     const { toolFunctions } = msg;
 
+    // Store tool functions for re-initialization after clear_context
+    global.__toolFunctions = toolFunctions;
+    global.__callMCPTool = global.__callMCPTool; // Ensure this is preserved
+
     // Generate tool functions that call back to parent
     eval(toolFunctions);
 
     // Add clear_context function
     global.clear_context = () => {
+      // Preserve system functions and MCP infrastructure
       const preserve = new Set([
         '__filename', '__dirname', 'module', 'exports', 'require',
         'console', 'process', 'Buffer', 'global',
         'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
         'setImmediate', 'clearImmediate',
-        'clear_context', ...Object.keys(global).filter(k => k.startsWith('browser_') || k.startsWith('mcp_') || k.startsWith('search_'))
+        'clear_context', '__toolFunctions', '__callMCPTool'
       ]);
 
+      // Clear user variables
       for (const key of Object.keys(global)) {
         if (!preserve.has(key)) {
           delete global[key];
         }
       }
 
-      console.log('[Context cleared]');
+      // Re-initialize all MCP tool functions
+      if (global.__toolFunctions) {
+        eval(global.__toolFunctions);
+        console.log('[Context cleared and tools re-initialized]');
+      } else {
+        console.log('[Context cleared]');
+      }
     };
 
     process.send({ type: 'INIT_COMPLETE' });
