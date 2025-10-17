@@ -1,5 +1,26 @@
 # CodeMode Agent Changelog
 
+## Version 2.0.19 - October 17, 2025
+
+### Breaking Changes
+- **Object-Based MCP Tool API**: All MCP tools now use object notation
+  - Tools are organized by server name: `serverName.toolName(params)`
+  - Examples: `builtInTools.Bash('ls')`, `playwright.browser_navigate('https://example.com')`
+  - Removes all prefixes for cleaner, more intuitive API
+  - **Migration**: Update `toolName()` calls to `serverName.toolName()`
+
+### Architecture Changes
+- **Simplified Tool Exposure**: Only `execute` tool is exposed to agents
+  - All MCP tools available as functions within execute context
+  - Dynamic tool description lists all available tools by server
+  - Removed standalone `createWindow` tool (use `playwright.browser_navigate` directly)
+
+### Improvements
+- Enhanced execute tool description with dynamic MCP tool listing
+- Added usage examples in tool description
+- Improved tool organization and discoverability
+- Better namespace management prevents naming conflicts
+
 ## Version 2.0.18 - October 17, 2025
 
 ### New Features

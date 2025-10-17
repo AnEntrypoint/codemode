@@ -298,9 +298,15 @@ class ExecutionContextManager {
     let functions = '';
     const toolDescriptions = {};
 
+    // Initialize server objects
     for (const [serverName, serverState] of this.mcpManager.servers) {
+      functions += `global.${serverName} = global.${serverName} || {};\n`;
       toolDescriptions[serverName] = [];
+    }
 
+    functions += '\n';
+
+    for (const [serverName, serverState] of this.mcpManager.servers) {
       for (const tool of serverState.tools) {
         toolDescriptions[serverName].push({
           name: tool.name,
@@ -332,11 +338,11 @@ class ExecutionContextManager {
         // Generate function that calls MCP tool via IPC, filtering out null/undefined values
         functions += `
 /**
- * ${tool.name} - ${tool.description}
+ * ${serverName}.${tool.name} - ${tool.description}
  * IMPORTANT: This is an async function. Always use 'await' when calling it.
- * Example: const result = await ${tool.name}(${paramNames.slice(0, Math.min(2, paramNames.length)).join(', ')});
+ * Example: const result = await ${serverName}.${tool.name}(${paramNames.slice(0, Math.min(2, paramNames.length)).join(', ')});
  */
-global.${tool.name} = ${signature} {
+global.${serverName}.${tool.name} = ${signature} {
 ${validation ? validation + '\n' : ''}  const args = {};
 ${paramNames.map((p, i) => `  if (${safeParamNames[i]} !== null && ${safeParamNames[i]} !== undefined) args.${p} = ${safeParamNames[i]};`).join('\n')}
   return await global.__callMCPTool('${serverName}', '${tool.name}', args);
@@ -413,19 +419,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
   let mcpToolsList = '';
   if (Object.keys(toolDescriptions).length > 0) {
-    mcpToolsList = '\n## Available Tools by MCP Server:\n';
+    mcpToolsList = '\n\n## Available MCP Tools:\n\nAll MCP tools are organized by server name as objects. Use the format: `serverName.toolName(params)`\n';
     for (const [serverName, tools] of Object.entries(toolDescriptions)) {
       mcpToolsList += `\n### ${serverName}:\n`;
       tools.forEach(tool => {
         const params = Object.keys(tool.inputSchema?.properties || {})
           .map(p => tool.inputSchema.required?.includes(p) ? p : `${p}?`)
           .join(', ');
-        mcpToolsList += `- ${tool.name}(${params}): ${tool.description}\n`;
+        mcpToolsList += `- ${serverName}.${tool.name}(${params}): ${tool.description}\n`;
       });
     }
   }
 
-  const description = `Execute JavaScript code with access to all MCP tools. Both MCP connections and execution context persist across calls - use clear_context() to reset.${mcpToolsList}\n\n**Special Functions:**\n- clear_context(): Clear all variables and state in the execution context`;
+  const description = `Execute JavaScript code with access to all MCP tools. Both MCP connections and execution context persist across calls - use clear_context() to reset.${mcpToolsList}\n\n**Special Functions:**\n- clear_context(): Clear all variables and state in the execution context\n\n**Examples:**\n- await builtInTools.Bash('ls -la')\n- await playwright.browser_navigate('https://example.com')\n- await builtInTools.Read('file.txt')`;
 
   return {
     tools: [
@@ -446,28 +452,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ['workingDirectory', 'code']
         }
-      },
-      {
-        name: 'createWindow',
-        description: 'Create a new browser window using Playwright. This is a convenience wrapper around browser_navigate.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            url: {
-              type: 'string',
-              description: 'URL to navigate to in the new window'
-            },
-            width: {
-              type: 'number',
-              description: 'Window width in pixels (optional, default: 1280)'
-            },
-            height: {
-              type: 'number',
-              description: 'Window height in pixels (optional, default: 720)'
-            }
-          },
-          required: ['url']
-        }
       }
     ]
   };
@@ -475,54 +459,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-
-  if (name === 'createWindow') {
-    try {
-      const { url, width = 1280, height = 720 } = args;
-
-      if (!url) {
-        throw new Error('url is required');
-      }
-
-      // Use the execution context to call Playwright browser tools
-      const code = `
-        // Resize browser if dimensions provided
-        if (${width} && ${height}) {
-          try {
-            await browser_resize(${width}, ${height});
-            console.log('Browser resized to ${width}x${height}');
-          } catch (e) {
-            console.log('Browser resize not available or failed:', e.message);
-          }
-        }
-
-        // Navigate to URL
-        await browser_navigate('${url.replace(/'/g, "\\'")}');
-        console.log('Navigated to ${url.replace(/'/g, "\\'")}');
-
-        // Return success
-        'Window created and navigated to ${url.replace(/'/g, "\\'")}'
-      `;
-
-      const result = await executionContext.execute(code, process.cwd());
-
-      if (result.success) {
-        return {
-          content: [{ type: 'text', text: result.output || `Window created successfully at ${url}` }]
-        };
-      } else {
-        return {
-          content: [{ type: 'text', text: result.output || 'Failed to create window' }],
-          isError: true
-        };
-      }
-    } catch (error) {
-      return {
-        content: [{ type: 'text', text: `Error creating window: ${error.message}` }],
-        isError: true
-      };
-    }
-  }
 
   if (name === 'execute') {
     try {
