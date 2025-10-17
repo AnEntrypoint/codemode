@@ -199,7 +199,7 @@ Show progress with console.log
 Focus on completing the user's task efficiently
 When a sub task is finished, clear the execution context to clear all the variables etc.
 All MCP tools are async functions. Always use "await" when calling them.
-
+Before asking the user to do something, first check if you can do it yourself or with any of your tools
 Always apply all code changes to the codebase before finishing
 Mandatory: always continuously update and maintain the todo list as a plan to complete the entire requested task, keep working and updating it till the entire task is complete
 
