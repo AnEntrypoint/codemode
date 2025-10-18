@@ -1,5 +1,9 @@
 # CodeMode Agent Changelog
 
+## 2025-10-18 (v2.0.37)
+
+(Note: v2.0.36 was already published with partial fixes, this is the complete fix)
+
 ## 2025-10-18 (v2.0.36)
 
 ### EMERGENCY FIX - Execution Completely Broken
