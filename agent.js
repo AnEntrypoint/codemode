@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 
-import { query, tool } from '@anthropic-ai/claude-agent-sdk';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import chalk from 'chalk';
 import hljs from 'highlight.js';
-import { executeCode } from './execute-handler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,13 +71,13 @@ if (!isAgentMode) {
 const taskIndex = args.indexOf('--agent') + 1;
 const task = taskIndex < args.length ? args.slice(taskIndex).join(' ') : 'Clean up this codebase';
 
-const workspaceDirectory = process.cwd();
 console.log('');
 console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
 console.log(chalk.blue.bold('  CodeMode Agent Session Start'));
+console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
 console.log('');
 console.log(chalk.cyan.bold('📋 Task:'), chalk.white(task));
-console.log(chalk.cyan.bold('📁 Working Directory:'), chalk.white(workspaceDirectory));
+console.log(chalk.cyan.bold('📁 Working Directory:'), chalk.white(process.cwd()));
 console.log(chalk.cyan.bold('🤖 Model:'), chalk.white('claude-sonnet-4-5'));
 console.log(chalk.cyan.bold('💭 Thinking:'), chalk.white('Enabled (10,000 token budget)'));
 console.log('');
@@ -92,20 +91,30 @@ let startMd = '';
 let mcpThorns = '';
 let wfgyHook = '';
 
-// Load external documentation and tools
-console.log(chalk.gray('   ├─ Loading external documentation...'));
 try {
-  startMd = '';
-  mcpThorns = '';
-  wfgyHook = '';
-  additionalTools = '\n\n# External Tool Documentation\n\nLoading MCP servers and external tools...\n\n';
+  startMd = execSync('curl -s https://raw.githubusercontent.com/AnEntrypoint/glootie-cc/refs/heads/master/start.md', { encoding: 'utf8', timeout: 5000 });
+  console.log(chalk.green('   ✓ glootie-cc documentation loaded'));
 } catch (error) {
-  console.log(chalk.yellow('   ⚠ Failed to load external documentation, using minimal mode'));
-  startMd = '';
-  mcpThorns = '';
-  wfgyHook = '';
-  additionalTools = '\n\n# Local Tool Documentation\n\nRunning in local mode with minimal dependencies.\n\n';
+  console.log(chalk.yellow('   ⚠ Warning: Failed to fetch glootie-cc:'), chalk.gray(error.message));
 }
+
+console.log(chalk.gray('   ├─ Loading mcp-thorns...'));
+try {
+  mcpThorns = execSync('npx -y mcp-thorns@latest', { encoding: 'utf8', timeout: 10000 });
+  console.log(chalk.green('   ✓ mcp-thorns loaded'));
+} catch (error) {
+  console.log(chalk.yellow('   ⚠ Warning: Failed to load mcp-thorns:'), chalk.gray(error.message));
+}
+
+console.log(chalk.gray('   ├─ Loading wfgy hooks...'));
+try {
+  wfgyHook = execSync('npx -y wfgy@latest hook', { encoding: 'utf8', timeout: 10000 });
+  console.log(chalk.green('   ✓ wfgy hooks loaded'));
+} catch (error) {
+  console.log(chalk.yellow('   ⚠ Warning: Failed to load wfgy:'), chalk.gray(error.message));
+}
+
+additionalTools = `\n\n# Additional Tool Documentation\n\n${startMd}\n\n${wfgyHook}\n\n`;
 
 console.log(chalk.cyan.bold('2️⃣  Loading MCP Servers'));
 
@@ -148,62 +157,40 @@ console.log(chalk.gray('   ├─ Enabling extended thinking mode...'));
 console.log(chalk.gray('   └─ Starting Claude agent...'));
 console.log('');
 
-const agentPrompt = `You are an AI assistant with access to the execute tool that executes JavaScript code.
+const agentPrompt = `You are an AI assistant with access to an execute tool that allows you to run JavaScript code in real time.
 
-# CRITICAL: How to Use Tools
+# Execute Tool persistent-context repl interface with extra tools, execute provides these functions that you can call in your JavaScript code:
 
-**ONLY ONE TOOL IS AVAILABLE TO YOU: execute**
+## File Operations
+Read(path, offset?, limit?) Read file content with optional offset and limit
+Write(path, content) Write content to file
+Edit(path, oldString, newString, replaceAll?) Edit file by replacing strings
+Glob(pattern, path?) Find files matching glob pattern
 
-You MUST use execute with TWO PARAMETERS:
-1. workingDirectory: The path where code executes
-2. code: JavaScript code as a string
-
-All functions below are ONLY available INSIDE the JavaScript code you pass to execute.
-
-**Example - CORRECT Usage:**
-\`\`\`
-Tool: execute
-Parameters:
-  workingDirectory: "/path/to/directory"
-  code: "const files = await LS(); console.log(files); await Write('test.txt', 'Hello');"
-\`\`\`
-
-**WRONG - These will FAIL:**
-- Using LS as a direct tool ❌
-- Using Write as a direct tool ❌
-- Using Bash as a direct tool ❌
-- Using Read as a direct tool ❌
-
-# Functions Available INSIDE execute Code:
-
-## File Operations (use with await)
-await Read(path, offset?, limit?) // Read file content
-await Write(path, content) // Write to file
-await Edit(path, oldString, newString, replaceAll?) // Edit file
-await Glob(pattern, path?) // Find files
-
-## Search Operations (use with await)
-await Grep(pattern, path?, options?) // Search files
+## Search Operations
+Grep(pattern, path?, options?) Search for pattern in files using ripgrep
   Options: {glob, type, output_mode, '-i', '-n', '-A', '-B', '-C', multiline, head_limit}
 
-## System Operations (use with await)
-await Bash(command, description?, timeout?) // Run shell command
-await LS(path?, show_hidden?, recursive?) // List directory
+## System Operations
+Bash(command, description?, timeout?) Execute shell command
+LS(path?, show_hidden?, recursive?) List directory contents
 
-## Web Operations (use with await)
-await WebFetch(url, prompt) // Fetch web content
-await WebSearch(query, allowed_domains?, blocked_domains?) // Search web
+## Web Operations
+WebFetch(url, prompt) Fetch and analyze web content
+WebSearch(query, allowed_domains?, blocked_domains?) Search the web
 
-## MCP Tools (use with await and namespace)
-await builtInTools.LS() // List with builtInTools namespace
-await playwright.browser_navigate(url) // Browser automation
-await vexify.search_code(query) // Code search
+## Task Management
+TodoWrite(todos) Write todo list
+  Format: [{content, status, activeForm}] where status is 'pending'|'in_progress'|'completed'
+
+## MCP Tools (from configured servers)
+All MCP tools from glootie, playwright, and vexify are also available as functions.
+Use browser automation, code analysis, and semantic search tools as needed.
 
 # Instructions
 
-ALWAYS use execute tool - it's the ONLY tool available
-Use await for ALL async functions inside your code
-Avoid const, use let or var for mutable variables
+Avoid using const in execute use mutables that can be overridden later
+Use the execute tool to run JavaScript code with these functions available
 use programmatic flow to reduce the amount of execute calls needed, conditionals, loops, and code structure is available to you no need for linear tool-by-tool execution
 Write code that completes the entire task, use as many executions as you need to
 All MCP tools are async functions. Always use "await" when calling them.
@@ -228,21 +215,6 @@ ONLY log:
 
 Keep output minimal and data-focused. Use code logic to filter and extract only essential information.
 
-# TASK COMPLETION CRITERIA
-CRITICAL: The task is ONLY complete when you have built a fully functional browser-based OS with:
-- A working package.json with proper dependencies
-- A server.js that serves the OS
-- HTML/CSS/JS files for the desktop environment
-- Working window management system
-- At least 3 functional applications (file manager, terminal, text editor)
-- Taskbar and application launcher
-- The system can start and run without errors
-
-DO NOT stop after creating a TODO list or initial planning.
-DO NOT consider the task complete after a single execution.
-Continue working until ALL components are implemented and tested.
-The user wants a COMPLETE browser OS, not just a plan.
-
 # Task
 ${task}
 
@@ -254,86 +226,6 @@ Date: ${new Date().toISOString().split('T')[0]}${additionalTools}
 ${mcpThorns}
 `;
 
-// Create the underlying MCP execute tool
-const mcpExecuteTool = tool(
-  'execute',
-  'Execute JavaScript code with access to file operations, shell commands, and MCP tools',
-  {
-    workingDirectory: {
-      type: 'string',
-      description: 'The working directory where the code will execute'
-    },
-    code: {
-      type: 'string',
-      description: 'JavaScript code to execute'
-    }
-  },
-  async (args) => {
-    try {
-      const result = await executeCode(args);
-      return {
-        content: [{ type: 'text', text: result }]
-      };
-    } catch (error) {
-      return {
-        content: [{ type: 'text', text: `Error: ${error.message}` }],
-        isError: true
-      };
-    }
-  }
-);
-
-// Create wrapper tool to eliminate prefix
-const executeTool = tool(
-  'execute',
-  'Execute JavaScript code with access to file operations, shell commands, and MCP tools',
-  {
-    workingDirectory: {
-      type: 'string',
-      description: 'The working directory where the code will execute (defaults to current directory)'
-    },
-    code: {
-      type: 'string',
-      description: 'JavaScript code to execute'
-    }
-  },
-  async (args) => {
-    try {
-      // Debug logging to see what we receive
-      console.log('DEBUG: Execute tool called with args:', JSON.stringify(args, null, 2));
-
-      // Ensure required parameters exist
-      if (!args.code) {
-        console.log('DEBUG: Missing parameter - code:', !!args.code);
-        throw new Error('code is required');
-      }
-
-      // Set default working directory if not provided
-      const workingDirectory = args.workingDirectory || process.cwd();
-      console.log('DEBUG: Using workingDirectory:', workingDirectory);
-
-      const result = await executeCode({ ...args, workingDirectory });
-      return {
-        content: [{ type: 'text', text: result }]
-      };
-    } catch (error) {
-      console.log('DEBUG: Execute tool error:', error.message);
-      return {
-        content: [{ type: 'text', text: `Error: ${error.message}` }],
-        isError: true
-      };
-    }
-  }
-);
-
-// Use the execute-handler.js as the execute server
-const executeServer = {
-  command: 'node',
-  args: [join(__dirname, 'execute-handler.js')],
-  cwd: __dirname
-};
-
-
 async function runAgent() {
   try {
     console.log(chalk.green.bold('✓ Session initialized successfully'));
@@ -341,23 +233,28 @@ async function runAgent() {
     console.log(chalk.blue.bold('━━━ Agent Execution Started ━━━'));
     console.log('');
 
-  
     const agentQuery = query({
       prompt: agentPrompt,
       options: {
         model: 'sonnet',
         permissionMode: 'bypassPermissions',
-        allowedTools: ['execute'],
+        allowedTools: ['mcp__codeMode__execute'],
         disallowedTools: [
-          'Task', 'Glob', 'Grep', 'ExitPlanMode',
-          'NotebookEdit', 'WebFetch', 'WebSearch', 'BashOutput', 'KillShell',
-          'SlashCommand', 'Skill', 'TodoWrite', 'LS', 'Read', 'Write', 'Edit', 'Bash'
+          'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Read', 'Edit', 'Write',
+          'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell',
+          'SlashCommand', 'Skill'
         ],
-        tools: [executeTool],
-        mcpServers: [executeServer],
         thinking: {
           type: 'enabled',
           budget_tokens: 10000
+        },
+        mcpServers: {
+          codeMode: {
+            type: 'stdio',
+            command: 'node',
+            args: [dirname(__filename) + '/code-mode.js'],
+            cwd: __dirname
+          }
         }
       }
     });
@@ -366,32 +263,7 @@ async function runAgent() {
     let isThinking = false;
     let thinkingBlockCount = 0;
 
-    let thinkingTimeout = null;
-    let thinkingDots = 0;
-
     for await (const message of agentQuery) {
-      // Debug: Show all message types
-      if (message.type === 'system') {
-        console.log(chalk.gray(`[Event: ${message.type}]`));
-
-        // Start thinking progress indicator
-        if (!thinkingTimeout) {
-          process.stdout.write(chalk.yellow('\n💭 Thinking'));
-          thinkingTimeout = setInterval(() => {
-            thinkingDots = (thinkingDots + 1) % 4;
-            process.stdout.write(chalk.yellow('.'.repeat(thinkingDots) + ' '.repeat(3 - thinkingDots) + '\r💭 Thinking'));
-          }, 500);
-        }
-      } else {
-        // Clear thinking indicator
-        if (thinkingTimeout) {
-          clearInterval(thinkingTimeout);
-          thinkingTimeout = null;
-          process.stdout.write('\r' + ' '.repeat(40) + '\r');
-        }
-        console.log(chalk.gray(`[Event: ${message.type}]`));
-      }
-
       if (message.type === 'text') {
         console.log(message.text);
       } else if (message.type === 'thinking_delta' || message.type === 'thinking') {
