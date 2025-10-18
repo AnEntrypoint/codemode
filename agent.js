@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import chalk from 'chalk';
 import hljs from 'highlight.js';
+import InteractiveMode from './interactive-mode.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -61,15 +62,22 @@ function printCodeBlock(code, language = 'javascript') {
 
 const args = process.argv.slice(2);
 const isAgentMode = args.includes('--agent');
+const isNonInteractive = args.includes('--no-interactive');
 
 if (!isAgentMode) {
-  console.error('Usage: node agent.js --agent [task]');
-  console.error('       codemode --agent [task]');
+  console.error('Usage: node agent.js --agent [task] [--no-interactive]');
+  console.error('       codemode --agent [task] [--no-interactive]');
   process.exit(1);
 }
 
-const taskIndex = args.indexOf('--agent') + 1;
-const task = taskIndex < args.length ? args.slice(taskIndex).join(' ') : 'Clean up this codebase';
+const filteredArgs = args.filter(arg => arg !== '--agent' && arg !== '--no-interactive');
+const task = filteredArgs.length > 0 ? filteredArgs.join(' ') : 'Clean up this codebase';
+
+let interactiveMode = null;
+if (!isNonInteractive) {
+  interactiveMode = new InteractiveMode();
+  interactiveMode.init();
+}
 
 console.log('');
 console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
@@ -80,6 +88,7 @@ console.log(chalk.cyan.bold('📋 Task:'), chalk.white(task));
 console.log(chalk.cyan.bold('📁 Working Directory:'), chalk.white(process.cwd()));
 console.log(chalk.cyan.bold('🤖 Model:'), chalk.white('claude-sonnet-4-5'));
 console.log(chalk.cyan.bold('💭 Thinking:'), chalk.white('Enabled (10,000 token budget)'));
+console.log(chalk.cyan.bold('🔄 Mode:'), chalk.white(isNonInteractive ? 'Single execution' : 'Interactive (streaming)'));
 console.log('');
 console.log(chalk.yellow.bold('━━━ Initializing Session ━━━'));
 console.log('');
@@ -237,198 +246,221 @@ async function runAgent() {
     console.log(chalk.blue.bold('━━━ Agent Execution Started ━━━'));
     console.log('');
 
-    const agentQuery = query({
-      prompt: agentPrompt,
-      options: {
-        model: 'sonnet',
-        permissionMode: 'bypassPermissions',
-        allowedTools: ['mcp__codeMode__execute'],
-        disallowedTools: [
-          'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Read', 'Edit', 'Write',
-          'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell',
-          'SlashCommand', 'Skill'
-        ],
-        thinking: {
-          type: 'enabled',
-          budget_tokens: 10000
-        },
-        mcpServers: {
-          codeMode: {
-            type: 'stdio',
-            command: 'node',
-            args: [dirname(__filename) + '/code-mode.js'],
-            cwd: __dirname
+    async function executeTask(taskPrompt) {
+      if (interactiveMode) {
+        interactiveMode.pause();
+      }
+
+      const agentQuery = query({
+        prompt: taskPrompt,
+        options: {
+          model: 'sonnet',
+          permissionMode: 'bypassPermissions',
+          allowedTools: ['mcp__codeMode__execute'],
+          disallowedTools: [
+            'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Read', 'Edit', 'Write',
+            'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell',
+            'SlashCommand', 'Skill'
+          ],
+          thinking: {
+            type: 'enabled',
+            budget_tokens: 10000
+          },
+          mcpServers: {
+            codeMode: {
+              type: 'stdio',
+              command: 'node',
+              args: [dirname(__filename) + '/code-mode.js'],
+              cwd: __dirname
+            }
           }
         }
-      }
-    });
+      });
 
-    let currentThinkingBlock = '';
-    let isThinking = false;
-    let thinkingBlockCount = 0;
+      let currentThinkingBlock = '';
+      let isThinking = false;
+      let thinkingBlockCount = 0;
 
-    for await (const message of agentQuery) {
-      if (message.type === 'text') {
-        console.log(message.text);
-      } else if (message.type === 'thinking_delta' || message.type === 'thinking') {
-        if (!isThinking) {
-          thinkingBlockCount++;
-          isThinking = true;
-          console.log('');
-          console.log(chalk.yellow.bold(`💭 Thinking (Block ${thinkingBlockCount})`));
-          console.log(chalk.gray('┌─────────────────────────────────────────────'));
-        }
+      for await (const message of agentQuery) {
+        if (message.type === 'text') {
+          console.log(message.text);
+        } else if (message.type === 'thinking_delta' || message.type === 'thinking') {
+          if (!isThinking) {
+            thinkingBlockCount++;
+            isThinking = true;
+            console.log('');
+            console.log(chalk.yellow.bold(`💭 Thinking (Block ${thinkingBlockCount})`));
+            console.log(chalk.gray('┌─────────────────────────────────────────────'));
+          }
 
-        const thinkingText = message.thinking || message.delta?.thinking || '';
-        currentThinkingBlock += thinkingText;
+          const thinkingText = message.thinking || message.delta?.thinking || '';
+          currentThinkingBlock += thinkingText;
 
-        process.stdout.write(chalk.gray('│ ') + chalk.yellow(thinkingText));
+          process.stdout.write(chalk.gray('│ ') + chalk.yellow(thinkingText));
 
-      } else if (message.type === 'assistant') {
-        if (isThinking) {
-          console.log('');
-          console.log(chalk.gray('└─────────────────────────────────────────────'));
-          console.log('');
-          isThinking = false;
-          currentThinkingBlock = '';
-        }
+        } else if (message.type === 'assistant') {
+          if (isThinking) {
+            console.log('');
+            console.log(chalk.gray('└─────────────────────────────────────────────'));
+            console.log('');
+            isThinking = false;
+            currentThinkingBlock = '';
+          }
 
-        if (message.message && message.message.content) {
-          const content = message.message.content;
-          if (Array.isArray(content)) {
-            content.forEach(item => {
-              if (item.type === 'text') {
-                printSection('Response', item.text, 'green');
-              } else if (item.type === 'thinking') {
-                printSection('Thinking Summary', chalk.yellow(item.thinking), 'yellow');
-              } else if (item.type === 'code') {
-                printCodeBlock(item.code, 'javascript');
-              } else if (item.type === 'tool_use') {
-                console.log('');
-                console.log(chalk.blue.bold('🔧 Tool Use:'), chalk.cyan(item.name));
-                if (item.input) {
-                  console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
+          if (message.message && message.message.content) {
+            const content = message.message.content;
+            if (Array.isArray(content)) {
+              content.forEach(item => {
+                if (item.type === 'text') {
+                  printSection('Response', item.text, 'green');
+                } else if (item.type === 'thinking') {
+                  printSection('Thinking Summary', chalk.yellow(item.thinking), 'yellow');
+                } else if (item.type === 'code') {
+                  printCodeBlock(item.code, 'javascript');
+                } else if (item.type === 'tool_use') {
+                  console.log('');
+                  console.log(chalk.blue.bold('🔧 Tool Use:'), chalk.cyan(item.name));
+                  if (item.input) {
+                    console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
 
-                  // Format inputs nicely instead of JSON
-                  for (const [key, value] of Object.entries(item.input)) {
-                    const displayKey = chalk.cyan(`${key}:`);
-                    if (typeof value === 'string') {
-                      if (value.length > 200) {
-                        console.log(displayKey, chalk.white(value));
-                        console.log(chalk.gray(`          (${value.length} characters total)`));
-                      } else if (value.includes('\n')) {
-                        console.log(displayKey);
-                        const lines = value.split('\n');
-                        lines.forEach(line => {
-                          console.log(chalk.gray('          ') + chalk.white(line));
-                        });
+                    for (const [key, value] of Object.entries(item.input)) {
+                      const displayKey = chalk.cyan(`${key}:`);
+                      if (typeof value === 'string') {
+                        if (value.length > 200) {
+                          console.log(displayKey, chalk.white(value));
+                          console.log(chalk.gray(`          (${value.length} characters total)`));
+                        } else if (value.includes('\n')) {
+                          console.log(displayKey);
+                          const lines = value.split('\n');
+                          lines.forEach(line => {
+                            console.log(chalk.gray('          ') + chalk.white(line));
+                          });
+                        } else {
+                          console.log(displayKey, chalk.white(value));
+                        }
+                      } else if (typeof value === 'object' && value !== null) {
+                        console.log(displayKey, chalk.white(JSON.stringify(value)));
                       } else {
-                        console.log(displayKey, chalk.white(value));
+                        console.log(displayKey, chalk.white(String(value)));
                       }
-                    } else if (typeof value === 'object' && value !== null) {
-                      console.log(displayKey, chalk.white(JSON.stringify(value)));
-                    } else {
-                      console.log(displayKey, chalk.white(String(value)));
                     }
                   }
-                }
-                console.log('');
-              } else if (item.type === 'tool_result') {
-                console.log('');
-                console.log(chalk.green.bold('✓ Tool Result'));
-                console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
+                  console.log('');
+                } else if (item.type === 'tool_result') {
+                  console.log('');
+                  console.log(chalk.green.bold('✓ Tool Result'));
+                  console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
 
-                // Extract text content from tool result
-                let resultText = '';
-                if (item.content) {
-                  if (Array.isArray(item.content)) {
-                    resultText = item.content
-                      .filter(c => c.type === 'text')
-                      .map(c => c.text)
-                      .join('\n');
-                  } else if (typeof item.content === 'string') {
-                    resultText = item.content;
-                  } else if (item.content.text) {
-                    resultText = item.content.text;
+                  let resultText = '';
+                  if (item.content) {
+                    if (Array.isArray(item.content)) {
+                      resultText = item.content
+                        .filter(c => c.type === 'text')
+                        .map(c => c.text)
+                        .join('\n');
+                    } else if (typeof item.content === 'string') {
+                      resultText = item.content;
+                    } else if (item.content.text) {
+                      resultText = item.content.text;
+                    }
                   }
-                }
 
-                // Display full output with no truncation
-                if (resultText) {
-                  console.log(chalk.white(resultText));
-                }
-                console.log('');
-              }
-            });
-          }
-        }
-      } else if (message.type === 'user') {
-        // Handle tool results that come as user messages
-        if (message.message && message.message.content) {
-          const content = message.message.content;
-          if (Array.isArray(content)) {
-            content.forEach(item => {
-              if (item.type === 'tool_result') {
-                console.log('');
-                console.log(chalk.green.bold('✓ Tool Result'));
-                console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
-
-                // Extract text content from tool result
-                let resultText = '';
-                if (item.content) {
-                  if (Array.isArray(item.content)) {
-                    resultText = item.content
-                      .filter(c => c.type === 'text')
-                      .map(c => c.text)
-                      .join('\n');
-                  } else if (typeof item.content === 'string') {
-                    resultText = item.content;
-                  } else if (item.content.text) {
-                    resultText = item.content.text;
+                  if (resultText) {
+                    console.log(chalk.white(resultText));
                   }
+                  console.log('');
                 }
+              });
+            }
+          }
+        } else if (message.type === 'user') {
+          if (message.message && message.message.content) {
+            const content = message.message.content;
+            if (Array.isArray(content)) {
+              content.forEach(item => {
+                if (item.type === 'tool_result') {
+                  console.log('');
+                  console.log(chalk.green.bold('✓ Tool Result'));
+                  console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
 
-                // Display full output with no truncation
-                if (resultText) {
-                  console.log(chalk.white(resultText));
+                  let resultText = '';
+                  if (item.content) {
+                    if (Array.isArray(item.content)) {
+                      resultText = item.content
+                        .filter(c => c.type === 'text')
+                        .map(c => c.text)
+                        .join('\n');
+                    } else if (typeof item.content === 'string') {
+                      resultText = item.content;
+                    } else if (item.content.text) {
+                      resultText = item.content.text;
+                    }
+                  }
+
+                  if (resultText) {
+                    console.log(chalk.white(resultText));
+                  }
+                  console.log('');
                 }
-                console.log('');
-              }
-            });
+              });
+            }
           }
-        }
-      } else if (message.type === 'tool_result') {
-        console.log('');
-        console.log(chalk.green.bold('✓ Tool Result'));
-        console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
-        if (message.content) {
-          const preview = String(message.content);
-          console.log(chalk.white(preview));
-          if (String(message.content).length > 500) {
-            console.log(chalk.gray(`... (${String(message.content).length} total characters)`));
+        } else if (message.type === 'tool_result') {
+          console.log('');
+          console.log(chalk.green.bold('✓ Tool Result'));
+          console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
+          if (message.content) {
+            const preview = String(message.content);
+            console.log(chalk.white(preview));
+            if (String(message.content).length > 500) {
+              console.log(chalk.gray(`... (${String(message.content).length} total characters)`));
+            }
           }
+          console.log('');
+        } else if (message.type === 'error') {
+          console.log('');
+          console.log(chalk.red.bold('✗ Error'));
+          console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
+          console.log(chalk.red(message.error || message.message));
+          console.log('');
+        } else {
+          console.log(chalk.gray(`[Event: ${message.type}]`));
         }
+      }
+
+      if (isThinking) {
         console.log('');
-      } else if (message.type === 'error') {
+        console.log(chalk.gray('└─────────────────────────────────────────────'));
         console.log('');
-        console.log(chalk.red.bold('✗ Error'));
-        console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 80, 80))));
-        console.log(chalk.red(message.error || message.message));
-        console.log('');
-      } else {
-        console.log(chalk.gray(`[Event: ${message.type}]`));
+      }
+
+      if (interactiveMode) {
+        interactiveMode.resume();
       }
     }
 
-    if (isThinking) {
+    await executeTask(agentPrompt);
+
+    if (!isNonInteractive) {
+      while (true) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        if (interactiveMode.hasCommands()) {
+          const nextCommand = interactiveMode.getNextCommand();
+          console.log('');
+          console.log(chalk.blue.bold('━━━ New Command ━━━'));
+          console.log(chalk.cyan.bold('📋 Task:'), chalk.white(nextCommand));
+          console.log('');
+
+          const followUpPrompt = `${agentPrompt}\n\n# Follow-up Task\n${nextCommand}`;
+          await executeTask(followUpPrompt);
+        }
+      }
+    } else {
       console.log('');
-      console.log(chalk.gray('└─────────────────────────────────────────────'));
+      console.log(chalk.green.bold('✓ Task completed successfully'));
       console.log('');
     }
-
-    console.log('');
-    console.log(chalk.green.bold('✓ Task completed successfully'));
-    console.log('');
 
   } catch (error) {
     console.log('');
@@ -443,6 +475,10 @@ async function runAgent() {
       console.log(chalk.gray(error.stack));
     }
     console.log('');
+
+    if (interactiveMode) {
+      interactiveMode.cleanup();
+    }
     process.exit(1);
   }
 }
