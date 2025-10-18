@@ -1,0 +1,1 @@
+console.error('[DEBUG] Before import'); import('@modelcontextprotocol/sdk/server/index.js').then(() => console.error('[DEBUG] Import successful')).catch(e => console.error('[DEBUG] Import failed:', e));

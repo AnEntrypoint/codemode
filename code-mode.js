@@ -326,16 +326,10 @@ class ExecutionContextManager {
           return isRequired ? p : `${p} = null`;
         }).join(', ')})`;
 
-        let validation = '';
-        if (required.length > 0) {
-          validation = required.map(p => {
-            const idx = paramNames.indexOf(p);
-            const safeName = safeParamNames[idx];
-            return `  if (${safeName} === null || ${safeName} === undefined) throw new Error('Missing required parameter: ${p}');`;
-          }).join('\n');
-        }
-
         // Generate function that calls MCP tool via IPC, filtering out null/undefined values
+        const paramNamesArray = JSON.stringify(paramNames);
+        const requiredArray = JSON.stringify(required);
+
         functions += `
 /**
  * ${serverName}.${tool.name} - ${tool.description}
@@ -343,8 +337,55 @@ class ExecutionContextManager {
  * Example: const result = await ${serverName}.${tool.name}(${paramNames.slice(0, Math.min(2, paramNames.length)).join(', ')});
  */
 global.${serverName}.${tool.name} = ${signature} {
-${validation ? validation + '\n' : ''}  const args = {};
-${paramNames.map((p, i) => `  if (${safeParamNames[i]} !== null && ${safeParamNames[i]} !== undefined) args.${p} = ${safeParamNames[i]};`).join('\n')}
+  // Define parameter names and required parameters inside the function
+  const paramNames = ${paramNamesArray};
+  const required = ${requiredArray};
+
+  // Flexible parameter handling for various LLM coding styles
+  let args = {};
+
+  // Handle different calling patterns that LLMs might generate:
+  if (paramNames.length > 0 && typeof ${safeParamNames[0]} === 'object' && ${safeParamNames[0]} !== null && !Array.isArray(${safeParamNames[0]})) {
+    // Object-style call: Write({file_path: '...', content: '...'})
+    args = ${safeParamNames[0]};
+  } else {
+    // Individual params call: Write('file.txt', 'content')
+    // Also handle missing/undefined parameters gracefully
+${paramNames.map((p, i) => `    if (${safeParamNames[i]} !== null && ${safeParamNames[i]} !== undefined) args.${p} = ${safeParamNames[i]};`).join('\n')}
+  }
+
+  // Common parameter name variations for LLM flexibility
+  const paramMappings = {
+    'file_path': ['filePath', 'filename', 'path', 'file'],
+    'content': ['text', 'data', 'body'],
+    'old_string': ['oldString', 'oldText', 'find'],
+    'new_string': ['newString', 'newText', 'replace'],
+    'file': ['file_path', 'filePath'],
+    'text': ['content', 'data'],
+    'command': ['cmd'],
+    'description': ['desc'],
+    'url': ['uri', 'link']
+  };
+
+  // Apply parameter name mappings for flexibility
+  for (const [canonical, alternatives] of Object.entries(paramMappings)) {
+    if (!args[canonical]) {
+      for (const alt of alternatives) {
+        if (args[alt] !== undefined) {
+          args[canonical] = args[alt];
+          break;
+        }
+      }
+    }
+  }
+
+  // Validate required parameters AFTER mapping (this is the fix!)
+  for (const paramName of required) {
+    if (args[paramName] === null || args[paramName] === undefined) {
+      throw new Error('Missing required parameter: ' + paramName);
+    }
+  }
+
   return await global.__callMCPTool('${serverName}', '${tool.name}', args);
 };
 
@@ -354,13 +395,8 @@ ${paramNames.map((p, i) => `  if (${safeParamNames[i]} !== null && ${safeParamNa
 
     // Add global aliases for commonly used built-in tools
     functions += `
-// Global aliases for commonly used tools
-global.TodoWrite = async (todos) => await builtInTools.TodoWrite({ todos });
-global.LS = async (path, show_hidden, recursive) => await builtInTools.LS({ path, show_hidden, recursive });
-global.Read = async (file_path, offset, limit) => await builtInTools.Read({ file_path, offset, limit });
-global.Write = async (file_path, content) => await builtInTools.Write({ file_path, content });
-global.Edit = async (file_path, old_string, new_string, replace_all) => await builtInTools.Edit({ file_path, old_string, new_string, replace_all });
-global.Bash = async (command, description, timeout) => await builtInTools.Bash({ command, description, timeout });
+// Note: No global aliases needed - the generated MCP functions are flexible enough
+// to handle both individual parameters and object parameters
 `;
 
     return { functions, toolDescriptions };

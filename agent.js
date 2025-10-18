@@ -329,14 +329,7 @@ async function runAgent() {
     console.log(chalk.blue.bold('━━━ Agent Execution Started ━━━'));
     console.log('');
 
-    // Debug: Log what tools we're passing
-    console.log('DEBUG: executeTool definition:', {
-      name: executeTool.name,
-      description: executeTool.description,
-      inputSchema: executeTool.inputSchema
-    });
-    console.log('DEBUG: Passing tools array:', [executeTool].map(t => ({ name: t.name, description: t.description })));
-
+  
     const agentQuery = query({
       prompt: agentPrompt,
       options: {
