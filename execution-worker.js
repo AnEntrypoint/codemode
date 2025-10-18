@@ -12,7 +12,7 @@ const originalConsoleLog = console.log;
 const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
 
-function startCapture() {
+function startCapture(execId) {
   capturedOutput = '';
 
   console.log = (...args) => {
@@ -21,6 +21,11 @@ function startCapture() {
     ).join(' ');
     capturedOutput += msg + '\n';
     originalConsoleLog(...args);
+
+    // Stream output in real-time
+    if (execId !== undefined) {
+      process.send({ type: 'STREAM_OUTPUT', execId, output: msg });
+    }
   };
 
   console.error = (...args) => {
@@ -29,6 +34,11 @@ function startCapture() {
     ).join(' ');
     capturedOutput += msg + '\n';
     originalConsoleError(...args);
+
+    // Stream output in real-time
+    if (execId !== undefined) {
+      process.send({ type: 'STREAM_OUTPUT', execId, output: msg });
+    }
   };
 
   console.warn = (...args) => {
@@ -37,6 +47,11 @@ function startCapture() {
     ).join(' ');
     capturedOutput += msg + '\n';
     originalConsoleWarn(...args);
+
+    // Stream output in real-time
+    if (execId !== undefined) {
+      process.send({ type: 'STREAM_OUTPUT', execId, output: msg });
+    }
   };
 }
 
@@ -65,7 +80,7 @@ process.on('message', (msg) => {
     const { execId, code, workingDirectory } = msg;
 
     (async () => {
-      startCapture();
+      startCapture(execId);
       try {
         process.chdir(workingDirectory);
         const result = await eval(`(async () => { ${code} })()`);
