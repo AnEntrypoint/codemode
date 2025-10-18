@@ -1,10 +1,26 @@
+# CodeMode Agent Changelog
+
 ## 2025-01-18
 
+### Bug Fixes
+- **LS Tool Array Support**: Fixed LS tool to properly return arrays when `files_only` parameter is true
+  - Added `files_only` parameter mapping to `as_array` in built-in tools
+  - Modified LS tool to return JSON-stringified array of file names (strings) for compatibility
+  - Fixed escape sequence handling in template string generation for tool functions
+  - Arrays now support `.filter()` and other array methods correctly
+  - Resolves "files.filter is not a function" error in agentic code editor
+
+### Testing
 - Added test.js with basic functionality tests
 - Added npm test script to package.json
 - Updated README.md with testing instructions
+- Added comprehensive test suite (test-all-tools.js) testing all built-in tools
+- Added LS-specific array test (test-ls-direct.js)
 
-    1→# CodeMode Agent Changelog
+### Tool Compatibility
+- Verified 1:1 compatibility between wrapper functions and built-in tools MCP server
+- All tools (Read, Write, Edit, Glob, Grep, Bash, LS) tested and working correctly
+- Path resolution working properly for all file operations
     2→
     3→## Version 2.0.19 - October 17, 2025
     4→

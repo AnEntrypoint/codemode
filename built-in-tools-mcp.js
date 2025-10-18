@@ -476,19 +476,13 @@ async function handleLS(args) {
   const listing = listDirectory(absPath);
 
   if (as_array) {
-    // Return array of objects with file info
+    // Return array of file names (strings) for compatibility with agent code
     const fileArray = listing.map(item => {
-      const fullPath = join(absPath, item.replace(/.*\((\d+) bytes\)/, ''));
-      const isDir = item.endsWith('/');
-      const size = isDir ? 0 : parseInt(item.match(/\((\d+) bytes\)/)?.[1] || '0');
-      return {
-        name: item.replace(/\/.*$/, '').replace(/\s*\(\d+ bytes\)$/, ''),
-        path: item,
-        isDirectory: isDir,
-        size: size
-      };
+      // Extract just the file/directory name without size info
+      return item.replace(/\/.*$/, '').replace(/\s*\(\d+ bytes\)$/, '').trim();
     });
-    return fileArray.slice(0, 1000); // Limit array size
+    // Return JSON string so it can be properly transmitted via MCP and parsed on the other end
+    return JSON.stringify(fileArray.slice(0, 1000));
   } else {
     // Return string representation (original behavior)
     let result = listing.length > 0 ? listing.join('\n') : 'Empty directory';

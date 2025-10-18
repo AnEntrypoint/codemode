@@ -396,17 +396,36 @@ ${paramNames.map((p, i) => `    if (${safeParamNames[i]} !== null && ${safeParam
     // Add global aliases for commonly used built-in tools with path resolution
     functions += `
 // Global aliases for built-in tools with automatic path resolution
-const path = require('path');
-
+// Simple path resolution without importing (cross-platform compatible)
 const resolvePath = (filePath) => {
   if (!filePath) return filePath;
-  if (path.isAbsolute(filePath)) return filePath;
+  // Check if absolute path (works for both Windows and Unix)
+  if (filePath.match(/^([a-zA-Z]:)?[\\\\\\/]/) || filePath.startsWith('/')) return filePath;
   const workingDir = global.__workingDirectory || process.cwd();
-  return path.resolve(workingDir, filePath);
+  // Simple path joining
+  const normalized = filePath.replace(/\\\\/g, '/');
+  return workingDir.replace(/\\\\/g, '/') + '/' + normalized;
 };
 
 global.TodoWrite = async (todos) => await builtInTools.TodoWrite({ todos });
-global.LS = async (lsPath, show_hidden, recursive) => await builtInTools.LS({ path: resolvePath(lsPath), show_hidden, recursive });
+global.LS = async (lsPath, show_hidden, recursive, files_only) => {
+  // Map files_only to as_array parameter (built-in tools uses as_array, not files_only)
+  const result = await builtInTools.LS({ path: resolvePath(lsPath), show_hidden, recursive, as_array: files_only });
+  // If as_array was requested, the result will be a JSON string that needs parsing
+  if (files_only && typeof result === 'string') {
+    try {
+      // Try to parse as JSON array first
+      const parsed = JSON.parse(result);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (e) {
+      // If not JSON, split string into array
+      return result.split('\\n').filter(line => line.trim() !== '' && line !== 'Empty directory');
+    }
+  }
+  return result;
+};
 global.Read = async (file_path, offset, limit) => await builtInTools.Read({ file_path: resolvePath(file_path), offset, limit });
 global.Write = async (file_path, content) => await builtInTools.Write({ file_path: resolvePath(file_path), content });
 global.Edit = async (file_path, old_string, new_string, replace_all) => await builtInTools.Edit({ file_path: resolvePath(file_path), old_string, new_string, replace_all });

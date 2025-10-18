@@ -3,6 +3,16 @@
 // Persistent execution context worker
 // Communicates with parent via IPC for MCP tool calls
 
+import { createRequire } from 'module';
+
+// Initialize global scope for user code
+// Note: These will be set to the actual workingDirectory when code executes
+global.require = null;
+global.__filename = null;
+global.__dirname = null;
+global.module = { exports: {} };
+global.exports = global.module.exports;
+
 const pendingMCPCalls = new Map();
 let nextCallId = 0;
 
@@ -83,8 +93,16 @@ process.on('message', (msg) => {
       startCapture(execId);
       try {
         process.chdir(workingDirectory);
-        // Store working directory in global context for tool calls
+
+        // Update context variables for current working directory
         global.__workingDirectory = workingDirectory;
+        global.__dirname = workingDirectory;
+        global.__filename = workingDirectory + '/[execute]';
+
+        // Create a scoped require for the working directory
+        const scopedRequire = createRequire(workingDirectory + '/package.json');
+        global.require = scopedRequire;
+
         const result = await eval(`(async () => { ${code} })()`);
 
         // If the code returns a value, add it to output
@@ -123,7 +141,7 @@ process.on('message', (msg) => {
         'console', 'process', 'Buffer', 'global',
         'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
         'setImmediate', 'clearImmediate',
-        'clear_context', '__toolFunctions', '__callMCPTool'
+        'clear_context', '__toolFunctions', '__callMCPTool', '__workingDirectory'
       ]);
 
       // Clear user variables
