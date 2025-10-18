@@ -107,32 +107,28 @@ process.on('message', (msg) => {
         const scopedRequire = createRequire(workingDirectory + '/package.json');
         global.require = scopedRequire;
 
-        // Execute code in persistent context using 'with' statement
-        // This allows variables assigned without let/const/var to persist
-        const contextProxy = new Proxy(persistentContext, {
-          has() { return true; }, // Intercept all property access
-          get(target, prop) {
-            // Check persistent context first, then global, then MCP tools
-            if (prop in target) return target[prop];
-            if (prop in global) return global[prop];
-            return undefined;
-          },
-          set(target, prop, value) {
-            // Store in persistent context
-            target[prop] = value;
-            return true;
-          }
-        });
+        // Execute code in persistent context
+        // Copy persistent context to global scope for access
+        Object.assign(global, persistentContext);
 
-        // Use 'with' to make contextProxy the scope chain for variable lookups
-        const wrappedCode = `
-          with (contextProxy) {
-            (async () => {
-              ${code}
-            })()
+        // Execute the code
+        const result = await eval(`(async () => { ${code} })()`);
+
+        // Save any new global variables back to persistent context
+        // Only save variables that aren't system properties
+        const systemProps = new Set([
+          '__filename', '__dirname', 'module', 'exports', 'require',
+          'console', 'process', 'Buffer', 'global', 'setTimeout',
+          'setInterval', 'clearTimeout', 'clearInterval', 'setImmediate',
+          'clearImmediate', 'clear_context', '__toolFunctions',
+          '__callMCPTool', '__workingDirectory'
+        ]);
+
+        for (const key in global) {
+          if (!systemProps.has(key) && key !== 'persistentContext') {
+            persistentContext[key] = global[key];
           }
-        `;
-        const result = await eval(wrappedCode);
+        }
 
         // If the code returns a value, add it to output
         if (result !== undefined) {

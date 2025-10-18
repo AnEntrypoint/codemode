@@ -50,7 +50,8 @@ class InteractiveMode {
     const self = this;
 
     this.rl._writeToOutput = function(stringToWrite) {
-      if (stringToWrite.length > 0 && stringToWrite !== '\r\n' && !self.isPaused) {
+      // Show input even when paused, but don't process it until resumed
+      if (stringToWrite.length > 0 && stringToWrite !== '\r\n') {
         const currentLine = this.line || '';
         if (currentLine.length > 0 && !self.isInputVisible) {
           self.showInputArea();
@@ -62,7 +63,14 @@ class InteractiveMode {
       originalWrite.apply(this, arguments);
     };
 
+    // Handle Ctrl-C on readline interface
     this.rl.on('SIGINT', () => {
+      this.cleanup();
+      process.exit(0);
+    });
+
+    // Also handle Ctrl-C on process level (backup handler)
+    process.on('SIGINT', () => {
       this.cleanup();
       process.exit(0);
     });

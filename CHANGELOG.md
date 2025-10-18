@@ -1,5 +1,42 @@
 # CodeMode Agent Changelog
 
+## 2025-10-18 (v2.0.36)
+
+### EMERGENCY FIX - Execution Completely Broken
+
+**Critical Bug Fixed**: Execute tool was completely non-functional in v2.0.34 and v2.0.35
+
+#### Strict Mode Error (v2.0.34-v2.0.35)
+- **Error**: "Strict mode code may not include a with statement"
+- **Impact**: ALL execute() calls failed immediately with syntax error
+- **Root Cause**: Used `with` statement for variable persistence, but ES modules run in strict mode
+- **Solution**: Replaced `with` statement with Object.assign approach
+- **Files**: execution-worker.js
+
+#### Interactive Mode Issues
+- **Issue 1**: Keyboard input not visible during agent execution
+  - Problem: Input display checked `!self.isPaused` condition
+  - Impact: Users couldn't see what they were typing
+  - Fix: Removed pause check from input visibility logic
+
+- **Issue 2**: Ctrl-C not exiting application
+  - Problem: Only readline had SIGINT handler, not main process
+  - Impact: Users couldn't interrupt execution
+  - Fix: Added process-level SIGINT handler as backup
+
+**Files Modified**:
+- execution-worker.js: Removed `with` statement, implemented Object.assign for persistence
+- interactive-mode.js: Fixed keyboard input visibility and Ctrl-C handling
+- package.json: Version 2.0.36
+
+**Testing**:
+- ✅ Basic execution works (tested with simple console.log)
+- ✅ No strict mode errors
+- ✅ Keyboard input now visible
+- ✅ Ctrl-C now exits properly
+
+**Note**: Variable persistence across execute() calls only works within the same MCP server session. Variables won't persist between different npx invocations.
+
 ## 2025-10-18 (v2.0.35)
 
 ### Critical Bug Fix - Grep Tool Variable Shadowing
