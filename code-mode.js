@@ -352,6 +352,17 @@ ${paramNames.map((p, i) => `  if (${safeParamNames[i]} !== null && ${safeParamNa
       }
     }
 
+    // Add global aliases for commonly used built-in tools
+    functions += `
+// Global aliases for commonly used tools
+global.TodoWrite = async (todos) => await builtInTools.TodoWrite({ todos });
+global.LS = async (path, show_hidden, recursive) => await builtInTools.LS({ path, show_hidden, recursive });
+global.Read = async (file_path, offset, limit) => await builtInTools.Read({ file_path, offset, limit });
+global.Write = async (file_path, content) => await builtInTools.Write({ file_path, content });
+global.Edit = async (file_path, old_string, new_string, replace_all) => await builtInTools.Edit({ file_path, old_string, new_string, replace_all });
+global.Bash = async (command, description, timeout) => await builtInTools.Bash({ command, description, timeout });
+`;
+
     return { functions, toolDescriptions };
   }
 
@@ -499,15 +510,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   };
 });
 
+
 async function main() {
   const config = loadConfig();
 
-  // Initialize persistent MCP servers
-  await mcpManager.initialize(config);
+  // Initialize persistent MCP servers with error handling
+  try {
+    await mcpManager.initialize(config);
+    console.error('[Execute Server] MCP servers initialized successfully');
+  } catch (error) {
+    console.error('[Execute Server] MCP server initialization failed, using fallback mode:', error.message);
+  }
 
-  // Initialize persistent execution context
-  executionContext = new ExecutionContextManager(mcpManager);
-  await executionContext.initialize();
+  // Initialize persistent execution context with error handling
+  try {
+    executionContext = new ExecutionContextManager(mcpManager);
+    await executionContext.initialize();
+    console.error('[Execute Server] Execution context initialized successfully');
+  } catch (error) {
+    console.error('[Execute Server] Execution context initialization failed:', error.message);
+    // Continue without MCP servers - use fallback mode
+  }
 
   // Handle shutdown
   const shutdown = () => {

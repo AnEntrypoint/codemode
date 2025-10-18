@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, tool } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import chalk from 'chalk';
 import hljs from 'highlight.js';
+import { executeCode } from './execute-handler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -71,13 +72,13 @@ if (!isAgentMode) {
 const taskIndex = args.indexOf('--agent') + 1;
 const task = taskIndex < args.length ? args.slice(taskIndex).join(' ') : 'Clean up this codebase';
 
+const workspaceDirectory = process.cwd();
 console.log('');
 console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
 console.log(chalk.blue.bold('  CodeMode Agent Session Start'));
-console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
 console.log('');
 console.log(chalk.cyan.bold('📋 Task:'), chalk.white(task));
-console.log(chalk.cyan.bold('📁 Working Directory:'), chalk.white(process.cwd()));
+console.log(chalk.cyan.bold('📁 Working Directory:'), chalk.white(workspaceDirectory));
 console.log(chalk.cyan.bold('🤖 Model:'), chalk.white('claude-sonnet-4-5'));
 console.log(chalk.cyan.bold('💭 Thinking:'), chalk.white('Enabled (10,000 token budget)'));
 console.log('');
@@ -147,40 +148,62 @@ console.log(chalk.gray('   ├─ Enabling extended thinking mode...'));
 console.log(chalk.gray('   └─ Starting Claude agent...'));
 console.log('');
 
-const agentPrompt = `You are an AI assistant with access to an execute tool that allows you to run JavaScript code in real time.
+const agentPrompt = `You are an AI assistant with access to the execute tool that executes JavaScript code.
 
-# Execute Tool persistent-context repl interface with extra tools, execute provides these functions that you can call in your JavaScript code:
+# CRITICAL: How to Use Tools
 
-## File Operations
-Read(path, offset?, limit?) Read file content with optional offset and limit
-Write(path, content) Write content to file
-Edit(path, oldString, newString, replaceAll?) Edit file by replacing strings
-Glob(pattern, path?) Find files matching glob pattern
+**ONLY ONE TOOL IS AVAILABLE TO YOU: execute**
 
-## Search Operations
-Grep(pattern, path?, options?) Search for pattern in files using ripgrep
+You MUST use execute with TWO PARAMETERS:
+1. workingDirectory: The path where code executes
+2. code: JavaScript code as a string
+
+All functions below are ONLY available INSIDE the JavaScript code you pass to execute.
+
+**Example - CORRECT Usage:**
+\`\`\`
+Tool: execute
+Parameters:
+  workingDirectory: "/path/to/directory"
+  code: "const files = await LS(); console.log(files); await Write('test.txt', 'Hello');"
+\`\`\`
+
+**WRONG - These will FAIL:**
+- Using LS as a direct tool ❌
+- Using Write as a direct tool ❌
+- Using Bash as a direct tool ❌
+- Using Read as a direct tool ❌
+
+# Functions Available INSIDE execute Code:
+
+## File Operations (use with await)
+await Read(path, offset?, limit?) // Read file content
+await Write(path, content) // Write to file
+await Edit(path, oldString, newString, replaceAll?) // Edit file
+await Glob(pattern, path?) // Find files
+
+## Search Operations (use with await)
+await Grep(pattern, path?, options?) // Search files
   Options: {glob, type, output_mode, '-i', '-n', '-A', '-B', '-C', multiline, head_limit}
 
-## System Operations
-Bash(command, description?, timeout?) Execute shell command
-LS(path?, show_hidden?, recursive?) List directory contents
+## System Operations (use with await)
+await Bash(command, description?, timeout?) // Run shell command
+await LS(path?, show_hidden?, recursive?) // List directory
 
-## Web Operations
-WebFetch(url, prompt) Fetch and analyze web content
-WebSearch(query, allowed_domains?, blocked_domains?) Search the web
+## Web Operations (use with await)
+await WebFetch(url, prompt) // Fetch web content
+await WebSearch(query, allowed_domains?, blocked_domains?) // Search web
 
-## Task Management
-TodoWrite(todos) Write todo list
-  Format: [{content, status, activeForm}] where status is 'pending'|'in_progress'|'completed'
-
-## MCP Tools (from configured servers)
-All MCP tools from glootie, playwright, and vexify are also available as functions.
-Use browser automation, code analysis, and semantic search tools as needed.
+## MCP Tools (use with await and namespace)
+await builtInTools.LS() // List with builtInTools namespace
+await playwright.browser_navigate(url) // Browser automation
+await vexify.search_code(query) // Code search
 
 # Instructions
 
-Avoid using const in execute use mutables that can be overridden later
-Use the execute tool to run JavaScript code with these functions available
+ALWAYS use execute tool - it's the ONLY tool available
+Use await for ALL async functions inside your code
+Avoid const, use let or var for mutable variables
 use programmatic flow to reduce the amount of execute calls needed, conditionals, loops, and code structure is available to you no need for linear tool-by-tool execution
 Write code that completes the entire task, use as many executions as you need to
 When calling tools, instead of logging exhaustively, use code to intelligently pick out the information you need, use zero unneccesary symbols in execution logs to keep the output clean and readable
@@ -219,6 +242,86 @@ Date: ${new Date().toISOString().split('T')[0]}${additionalTools}
 ${mcpThorns}
 `;
 
+// Create the underlying MCP execute tool
+const mcpExecuteTool = tool(
+  'execute',
+  'Execute JavaScript code with access to file operations, shell commands, and MCP tools',
+  {
+    workingDirectory: {
+      type: 'string',
+      description: 'The working directory where the code will execute'
+    },
+    code: {
+      type: 'string',
+      description: 'JavaScript code to execute'
+    }
+  },
+  async (args) => {
+    try {
+      const result = await executeCode(args);
+      return {
+        content: [{ type: 'text', text: result }]
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `Error: ${error.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// Create wrapper tool to eliminate prefix
+const executeTool = tool(
+  'execute',
+  'Execute JavaScript code with access to file operations, shell commands, and MCP tools',
+  {
+    workingDirectory: {
+      type: 'string',
+      description: 'The working directory where the code will execute (defaults to current directory)'
+    },
+    code: {
+      type: 'string',
+      description: 'JavaScript code to execute'
+    }
+  },
+  async (args) => {
+    try {
+      // Debug logging to see what we receive
+      console.log('DEBUG: Execute tool called with args:', JSON.stringify(args, null, 2));
+
+      // Ensure required parameters exist
+      if (!args.code) {
+        console.log('DEBUG: Missing parameter - code:', !!args.code);
+        throw new Error('code is required');
+      }
+
+      // Set default working directory if not provided
+      const workingDirectory = args.workingDirectory || process.cwd();
+      console.log('DEBUG: Using workingDirectory:', workingDirectory);
+
+      const result = await executeCode({ ...args, workingDirectory });
+      return {
+        content: [{ type: 'text', text: result }]
+      };
+    } catch (error) {
+      console.log('DEBUG: Execute tool error:', error.message);
+      return {
+        content: [{ type: 'text', text: `Error: ${error.message}` }],
+        isError: true
+      };
+    }
+  }
+);
+
+// Use the execute-handler.js as the execute server
+const executeServer = {
+  command: 'node',
+  args: [join(__dirname, 'execute-handler.js')],
+  cwd: __dirname
+};
+
+
 async function runAgent() {
   try {
     console.log(chalk.green.bold('✓ Session initialized successfully'));
@@ -226,28 +329,30 @@ async function runAgent() {
     console.log(chalk.blue.bold('━━━ Agent Execution Started ━━━'));
     console.log('');
 
+    // Debug: Log what tools we're passing
+    console.log('DEBUG: executeTool definition:', {
+      name: executeTool.name,
+      description: executeTool.description,
+      inputSchema: executeTool.inputSchema
+    });
+    console.log('DEBUG: Passing tools array:', [executeTool].map(t => ({ name: t.name, description: t.description })));
+
     const agentQuery = query({
       prompt: agentPrompt,
       options: {
         model: 'sonnet',
         permissionMode: 'bypassPermissions',
-        allowedTools: ['mcp__codeMode__execute'],
+        allowedTools: ['execute'],
         disallowedTools: [
-          'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Read', 'Edit', 'Write',
-          'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell',
-          'SlashCommand', 'Skill'
+          'Task', 'Glob', 'Grep', 'ExitPlanMode',
+          'NotebookEdit', 'WebFetch', 'WebSearch', 'BashOutput', 'KillShell',
+          'SlashCommand', 'Skill', 'TodoWrite', 'LS', 'Read', 'Write', 'Edit', 'Bash'
         ],
+        tools: [executeTool],
+        mcpServers: [executeServer],
         thinking: {
           type: 'enabled',
           budget_tokens: 10000
-        },
-        mcpServers: {
-          codeMode: {
-            type: 'stdio',
-            command: 'node',
-            args: [dirname(__filename) + '/code-mode.js'],
-            cwd: __dirname
-          }
         }
       }
     });

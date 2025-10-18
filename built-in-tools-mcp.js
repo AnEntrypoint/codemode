@@ -8,7 +8,6 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSy
 import { join, resolve, dirname, basename } from 'path';
 import fg from 'fast-glob';
 import { Readability } from '@mozilla/readability';
-import { JSDOM } from 'jsdom';
 import fetch from 'node-fetch';
 
 const server = new Server(
@@ -120,13 +119,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'LS',
-        description: 'List directory contents with file sizes. Supports hidden files and recursive listing.',
+        description: 'List directory contents with file sizes. Supports hidden files and recursive listing. Can return as array or string.',
         inputSchema: {
           type: 'object',
           properties: {
             path: { type: 'string', description: 'Directory path to list (default: current directory)' },
             show_hidden: { type: 'boolean', description: 'Show hidden files (default: false)' },
-            recursive: { type: 'boolean', description: 'List recursively (default: false)' }
+            recursive: { type: 'boolean', description: 'List recursively (default: false)' },
+            as_array: { type: 'boolean', description: 'Return results as array of objects instead of string (default: false)' }
           },
           required: []
         }
@@ -437,7 +437,7 @@ async function handleBash(args) {
 }
 
 async function handleLS(args) {
-  const { path = '.', show_hidden = false, recursive = false } = args;
+  const { path = '.', show_hidden = false, recursive = false, as_array = false } = args;
   const absPath = resolve(process.cwd(), path);
 
   if (!existsSync(absPath)) {
@@ -474,13 +474,29 @@ async function handleLS(args) {
   }
 
   const listing = listDirectory(absPath);
-  let result = listing.length > 0 ? listing.join('\n') : 'Empty directory';
 
-  if (result.length > 30000) {
-    result = result.substring(0, 30000);
+  if (as_array) {
+    // Return array of objects with file info
+    const fileArray = listing.map(item => {
+      const fullPath = join(absPath, item.replace(/.*\((\d+) bytes\)/, ''));
+      const isDir = item.endsWith('/');
+      const size = isDir ? 0 : parseInt(item.match(/\((\d+) bytes\)/)?.[1] || '0');
+      return {
+        name: item.replace(/\/.*$/, '').replace(/\s*\(\d+ bytes\)$/, ''),
+        path: item,
+        isDirectory: isDir,
+        size: size
+      };
+    });
+    return fileArray.slice(0, 1000); // Limit array size
+  } else {
+    // Return string representation (original behavior)
+    let result = listing.length > 0 ? listing.join('\n') : 'Empty directory';
+    if (result.length > 30000) {
+      result = result.substring(0, 30000);
+    }
+    return result;
   }
-
-  return result;
 }
 
 async function handleTodoWrite(args) {
@@ -498,6 +514,9 @@ async function handleWebFetch(args) {
     }
 
     const html = await response.text();
+
+    // Dynamically import JSDOM to avoid startup issues
+    const { JSDOM } = await import('jsdom');
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
