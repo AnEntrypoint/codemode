@@ -157,7 +157,7 @@ console.log(chalk.gray('   ├─ Enabling extended thinking mode...'));
 console.log(chalk.gray('   └─ Starting Claude agent...'));
 console.log('');
 
-const agentPrompt = `You are an AI assistant with access to an execute tool that allows you to run JavaScript code in real time.
+const agentPrompt = `You are an AI assistant with access to an execute tool that allows you to run JavaScript code in real time, you must use this environment to fulfill the task as changes to the current folder.
 
 # Execute Tool persistent-context repl interface with extra tools, execute provides these functions that you can call in your JavaScript code:
 
