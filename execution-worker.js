@@ -16,6 +16,10 @@ global.exports = global.module.exports;
 const pendingMCPCalls = new Map();
 let nextCallId = 0;
 
+// Persistent execution context - maintains state across all executions
+// All user code shares this context for variable persistence
+const persistentContext = {};
+
 // Capture console output
 let capturedOutput = '';
 const originalConsoleLog = console.log;
@@ -103,7 +107,32 @@ process.on('message', (msg) => {
         const scopedRequire = createRequire(workingDirectory + '/package.json');
         global.require = scopedRequire;
 
-        const result = await eval(`(async () => { ${code} })()`);
+        // Execute code in persistent context using 'with' statement
+        // This allows variables assigned without let/const/var to persist
+        const contextProxy = new Proxy(persistentContext, {
+          has() { return true; }, // Intercept all property access
+          get(target, prop) {
+            // Check persistent context first, then global, then MCP tools
+            if (prop in target) return target[prop];
+            if (prop in global) return global[prop];
+            return undefined;
+          },
+          set(target, prop, value) {
+            // Store in persistent context
+            target[prop] = value;
+            return true;
+          }
+        });
+
+        // Use 'with' to make contextProxy the scope chain for variable lookups
+        const wrappedCode = `
+          with (contextProxy) {
+            (async () => {
+              ${code}
+            })()
+          }
+        `;
+        const result = await eval(wrappedCode);
 
         // If the code returns a value, add it to output
         if (result !== undefined) {
@@ -135,7 +164,12 @@ process.on('message', (msg) => {
 
     // Add clear_context function
     global.clear_context = () => {
-      // Preserve system functions and MCP infrastructure
+      // Clear the persistent context
+      for (const key of Object.keys(persistentContext)) {
+        delete persistentContext[key];
+      }
+
+      // Preserve system functions and MCP infrastructure in global
       const preserve = new Set([
         '__filename', '__dirname', 'module', 'exports', 'require',
         'console', 'process', 'Buffer', 'global',
@@ -144,7 +178,7 @@ process.on('message', (msg) => {
         'clear_context', '__toolFunctions', '__callMCPTool', '__workingDirectory'
       ]);
 
-      // Clear user variables
+      // Clear user variables from global
       for (const key of Object.keys(global)) {
         if (!preserve.has(key)) {
           delete global[key];
@@ -183,12 +217,13 @@ global.__callMCPTool = async (serverName, toolName, args) => {
       args
     });
 
+    // Timeout of 180 seconds for long-running operations
     setTimeout(() => {
       if (pendingMCPCalls.has(callId)) {
         pendingMCPCalls.delete(callId);
         reject(new Error('MCP call timeout'));
       }
-    }, 60000);
+    }, 180000);
   });
 };
 

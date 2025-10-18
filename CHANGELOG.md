@@ -1,5 +1,54 @@
 # CodeMode Agent Changelog
 
+## 2025-10-18
+
+### Critical Fixes - Variable Persistence & Execution Context
+- **Variable Persistence**: Implemented true persistent execution context using Proxy-based scope
+  - Variables assigned without `let/const/var` now persist across execute() calls
+  - Added `persistentContext` object to maintain state between executions
+  - Used Proxy with `with` statement to create persistent scope chain
+  - Fixed issue where each eval() created isolated scope preventing persistence
+
+- **Increased MCP Timeout**: Extended timeout from 60s to 180s for long-running operations
+  - Fixes timeout errors during npm install and other lengthy operations
+  - Allows proper completion of package installations and builds
+
+- **Context Reset**: Enhanced `clear_context()` function
+  - Now properly clears both `persistentContext` and global variables
+  - Maintains MCP tool functions and system variables
+  - Provides clean slate while preserving infrastructure
+
+### Bug Fixes from Test Repo Analysis
+- **Zod Dependency Conflict**: Identified and documented zod version mismatch issue
+  - `@anthropic-ai/claude-agent-sdk` requires zod@^3.24.1
+  - Package had zod@4.1.12 causing peer dependency conflicts
+  - Solution: Downgrade to zod@^3.24.1 and clean install
+
+- **Vite Compatibility**: Documented Node.js version requirements
+  - Vite 7.x requires Node.js >=22.12.0
+  - Vite 6.x compatible with Node.js 22.11.0
+  - Added version selection guidance for users
+
+### Implementation Details
+- Modified `execution-worker.js` to use persistent context via Proxy
+- Proxy intercepts all property access for seamless variable persistence
+- Scope chain: persistentContext → global → MCP tools
+- Variables without declaration keywords automatically persist
+- Example: `myVar = 42` persists, `let myVar = 42` does not
+
+### Known Limitations
+- Variables declared with `let`, `const`, or `var` won't persist (by design)
+- Must use bare assignment (`myVar = 42`) or explicit global (`global.myVar = 42`)
+- Clear separation between transient (let/const/var) and persistent (bare) variables
+
+### Future Enhancements (Requested)
+- **Async Execution Mode**: Switch to background mode after 30s timeout
+  - Return execution ID for long-running operations
+  - Add `watch_execution(id)` function to monitor progress
+  - Add `wait(seconds, id?)` function to explicitly wait for completion
+  - Allow multiple concurrent background executions
+  - Maintain shared execution context across all executions
+
 ## 2025-01-18
 
 ### Bug Fixes
