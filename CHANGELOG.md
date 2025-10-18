@@ -1,6 +1,35 @@
 # CodeMode Agent Changelog
 
-## 2025-10-18
+## 2025-10-18 (v2.0.35)
+
+### Critical Bug Fix - Grep Tool Variable Shadowing
+- **Fixed Grep tool complete failure**: Grep was returning working directory path instead of search results
+- **Root Cause**: Variable shadowing - `resolve` from path module shadowed Promise `resolve` callback
+- **Impact**: Grep tool was completely broken, returning incorrect results
+- **Solution**: Renamed path module imports to avoid shadowing (resolve → resolvePath)
+- **Files**: built-in-tools-mcp.js
+- **Testing**: All 14 built-in tools now pass comprehensive parity tests
+
+### Tool Parity Verification
+- Created comprehensive test suite to verify MCP server matches Claude Code internal tools
+- Verified exact input/output parity for all 9 built-in tools:
+  - Read (with offset/limit, error handling)
+  - Write (create/overwrite)
+  - Edit (single/all replacements)
+  - Glob (pattern matching)
+  - Grep (search with options) ✓ FIXED
+  - Bash (command execution with description)
+  - LS (string/array output modes)
+  - TodoWrite (task tracking)
+  - WebFetch (web content retrieval)
+
+### Implementation Details
+- Renamed all path.resolve imports to resolvePath throughout built-in-tools-mcp.js
+- Fixed shadowing in 5 functions: handleRead, handleWrite, handleEdit, handleGlob, handleGrep, handleLS
+- Preserved Promise resolve/reject callbacks in async handlers
+- All syntax checks passed, zero regressions
+
+## 2025-10-18 (v2.0.34)
 
 ### Critical Fixes - Variable Persistence & Execution Context
 - **Variable Persistence**: Implemented true persistent execution context using Proxy-based scope

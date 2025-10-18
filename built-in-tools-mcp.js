@@ -5,7 +5,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { spawn } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'fs';
-import { join, resolve, dirname, basename } from 'path';
+import { join, resolve as resolvePath, dirname, basename } from 'path';
 import fg from 'fast-glob';
 import { Readability } from '@mozilla/readability';
 import fetch from 'node-fetch';
@@ -225,7 +225,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 async function handleRead(args) {
   const { file_path, offset, limit } = args;
-  const absPath = resolve(process.cwd(), file_path);
+  const absPath = resolvePath(process.cwd(), file_path);
 
   if (!existsSync(absPath)) {
     throw new Error(`File not found: ${absPath}`);
@@ -258,7 +258,7 @@ async function handleRead(args) {
 
 async function handleWrite(args) {
   const { file_path, content } = args;
-  const absPath = resolve(process.cwd(), file_path);
+  const absPath = resolvePath(process.cwd(), file_path);
   const fileExists = existsSync(absPath);
 
   if (fileExists) {
@@ -280,7 +280,7 @@ async function handleWrite(args) {
 
 async function handleEdit(args) {
   const { file_path, old_string, new_string, replace_all = false } = args;
-  const absPath = resolve(process.cwd(), file_path);
+  const absPath = resolvePath(process.cwd(), file_path);
 
   if (!existsSync(absPath)) {
     throw new Error(`File not found: ${absPath}`);
@@ -316,7 +316,7 @@ async function handleEdit(args) {
 
 async function handleGlob(args) {
   const { pattern, path } = args;
-  const cwd = path ? resolve(process.cwd(), path) : process.cwd();
+  const cwd = path ? resolvePath(process.cwd(), path) : process.cwd();
 
   const files = await fg(pattern, {
     cwd,
@@ -342,7 +342,7 @@ async function handleGrep(args) {
   const { pattern, path = '.', options = {} } = args;
 
   return new Promise((resolve, reject) => {
-    const searchPath = resolve(process.cwd(), path);
+    const searchPath = resolvePath(process.cwd(), path);
     const rgArgs = [pattern, searchPath];
 
     if (options.glob) rgArgs.push('--glob', options.glob);
@@ -438,7 +438,7 @@ async function handleBash(args) {
 
 async function handleLS(args) {
   const { path = '.', show_hidden = false, recursive = false, as_array = false } = args;
-  const absPath = resolve(process.cwd(), path);
+  const absPath = resolvePath(process.cwd(), path);
 
   if (!existsSync(absPath)) {
     throw new Error(`Path not found: ${absPath}`);

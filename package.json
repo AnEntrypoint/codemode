@@ -1,6 +1,6 @@
 {
   "name": "codemode-agent",
-  "version": "2.0.34",
+  "version": "2.0.35",
   "description": "Claude agent with execute tool providing programmatic access to file operations, system commands, and MCP tools",
   "main": "agent.js",
   "type": "module",
