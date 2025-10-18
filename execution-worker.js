@@ -108,8 +108,14 @@ process.on('message', (msg) => {
         global.require = scopedRequire;
 
         // Execute code in persistent context
-        // Copy persistent context to global scope for access
-        Object.assign(global, persistentContext);
+        // Copy persistent context to global scope, skipping read-only properties
+        for (const key in persistentContext) {
+          try {
+            global[key] = persistentContext[key];
+          } catch (e) {
+            // Skip read-only properties like 'navigator'
+          }
+        }
 
         // Execute the code
         const result = await eval(`(async () => { ${code} })()`);
@@ -121,12 +127,16 @@ process.on('message', (msg) => {
           'console', 'process', 'Buffer', 'global', 'setTimeout',
           'setInterval', 'clearTimeout', 'clearInterval', 'setImmediate',
           'clearImmediate', 'clear_context', '__toolFunctions',
-          '__callMCPTool', '__workingDirectory'
+          '__callMCPTool', '__workingDirectory', 'navigator', 'window'
         ]);
 
         for (const key in global) {
           if (!systemProps.has(key) && key !== 'persistentContext') {
-            persistentContext[key] = global[key];
+            try {
+              persistentContext[key] = global[key];
+            } catch (e) {
+              // Skip properties that can't be serialized
+            }
           }
         }
 

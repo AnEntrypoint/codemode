@@ -1,5 +1,29 @@
 # CodeMode Agent Changelog
 
+## 2025-10-18 (v2.0.38)
+
+### Critical Fix - Object.assign Read-Only Property Error
+
+**Fixed**: "Cannot set property navigator of #<Object> which has only a getter"
+
+#### Issue
+- v2.0.37 used `Object.assign(global, persistentContext)` which tried to overwrite read-only properties
+- Properties like `navigator`, `window` are getters on the global object and cannot be reassigned
+- This caused ALL execute() calls to fail with TypeError
+
+#### Solution
+- Replaced `Object.assign` with explicit for-loop that tries/catches individual property assignments
+- Added try-catch blocks for both reading from and writing to persistent context
+- Added 'navigator' and 'window' to systemProps exclusion list
+
+#### Files Modified
+- execution-worker.js (lines 110-141)
+
+#### Testing
+- ✅ Basic execution works without errors
+- ✅ No TypeError on navigator property
+- ✅ Code executes successfully
+
 ## 2025-10-18 (v2.0.37)
 
 (Note: v2.0.36 was already published with partial fixes, this is the complete fix)
