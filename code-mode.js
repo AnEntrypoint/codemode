@@ -393,10 +393,26 @@ ${paramNames.map((p, i) => `    if (${safeParamNames[i]} !== null && ${safeParam
       }
     }
 
-    // Add global aliases for commonly used built-in tools
+    // Add global aliases for commonly used built-in tools with path resolution
     functions += `
-// Note: No global aliases needed - the generated MCP functions are flexible enough
-// to handle both individual parameters and object parameters
+// Global aliases for built-in tools with automatic path resolution
+const path = require('path');
+
+const resolvePath = (filePath) => {
+  if (!filePath) return filePath;
+  if (path.isAbsolute(filePath)) return filePath;
+  const workingDir = global.__workingDirectory || process.cwd();
+  return path.resolve(workingDir, filePath);
+};
+
+global.TodoWrite = async (todos) => await builtInTools.TodoWrite({ todos });
+global.LS = async (lsPath, show_hidden, recursive) => await builtInTools.LS({ path: resolvePath(lsPath), show_hidden, recursive });
+global.Read = async (file_path, offset, limit) => await builtInTools.Read({ file_path: resolvePath(file_path), offset, limit });
+global.Write = async (file_path, content) => await builtInTools.Write({ file_path: resolvePath(file_path), content });
+global.Edit = async (file_path, old_string, new_string, replace_all) => await builtInTools.Edit({ file_path: resolvePath(file_path), old_string, new_string, replace_all });
+global.Bash = async (command, description, timeout) => await builtInTools.Bash({ command, description, timeout });
+global.Glob = async (pattern, globPath) => await builtInTools.Glob({ pattern, path: resolvePath(globPath) });
+global.Grep = async (pattern, grepPath, options) => await builtInTools.Grep({ pattern, path: resolvePath(grepPath), ...options });
 `;
 
     return { functions, toolDescriptions };

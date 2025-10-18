@@ -83,6 +83,8 @@ process.on('message', (msg) => {
       startCapture(execId);
       try {
         process.chdir(workingDirectory);
+        // Store working directory in global context for tool calls
+        global.__workingDirectory = workingDirectory;
         const result = await eval(`(async () => { ${code} })()`);
 
         // If the code returns a value, add it to output

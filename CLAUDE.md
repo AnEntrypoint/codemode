@@ -419,3 +419,23 @@ This document provides comprehensive analysis of all available tools in this Cla
 ---
 
 *This documentation provides comprehensive analysis of all available tools. For specific MCP tool details, consult individual tool documentation as available.*
+
+
+## Testing
+
+### Test Infrastructure
+- test.js: Basic functional tests using Node.js fs module
+- npm test: Runs test.js
+- Integration tests (test-*.js files) require MCP server running
+
+### Testing Patterns
+- Built-in tools return strings, not objects/arrays
+- Glob returns newline-separated string of files
+- Grep returns working directory path as string
+- Execute tool requires MCP protocol communication
+- Worker process exits after execution, needs proper result handling
+
+### Test Execution
+- Simple tests: npm test (synchronous, no MCP required)
+- Integration tests: node code-mode.js (start server first)
+- Execute tool tests: Use MCP protocol with tools/call method

@@ -148,6 +148,25 @@ Edit `.codemode.json` to configure MCP servers:
 }
 ```
 
+## Testing
+
+Run the test suite:
+
+```bash
+npm test
+```
+
+The test suite validates basic functionality. For full integration testing of the execute tool with MCP servers:
+
+```bash
+# Start the MCP server
+node code-mode.js
+
+# In another terminal, run integration tests
+node test-builtin-tools.js
+```
+
+
 ## License
 
 MIT

@@ -1,215 +1,222 @@
-# CodeMode Agent Changelog
+## 2025-01-18
 
-## Version 2.0.19 - October 17, 2025
+- Added test.js with basic functionality tests
+- Added npm test script to package.json
+- Updated README.md with testing instructions
 
-### Breaking Changes
-- **Object-Based MCP Tool API**: All MCP tools now use object notation
-  - Tools are organized by server name: `serverName.toolName(params)`
-  - Examples: `builtInTools.Bash('ls')`, `playwright.browser_navigate('https://example.com')`
-  - Removes all prefixes for cleaner, more intuitive API
-  - **Migration**: Update `toolName()` calls to `serverName.toolName()`
-
-### Architecture Changes
-- **Simplified Tool Exposure**: Only `execute` tool is exposed to agents
-  - All MCP tools available as functions within execute context
-  - Dynamic tool description lists all available tools by server
-  - Removed standalone `createWindow` tool (use `playwright.browser_navigate` directly)
-
-### Improvements
-- Enhanced execute tool description with dynamic MCP tool listing
-- Added usage examples in tool description
-- Improved tool organization and discoverability
-- Better namespace management prevents naming conflicts
-
-## Version 2.0.18 - October 17, 2025
-
-### New Features
-- **Added createWindow Tool**: New convenience tool for creating browser windows with Playwright
-  - `mcp__codeMode__createWindow(url, width, height)`
-  - Automatically resizes browser and navigates to specified URL
-  - Simplifies common browser automation workflows
-  - Integrates with existing Playwright MCP tools
-
-### Implementation Details
-- Tool added to code-mode.js MCP server
-- Wraps `browser_resize` and `browser_navigate` Playwright tools
-- Default dimensions: 1280x720 pixels
-- Proper error handling and validation
-
-## Version 2.0.17 - October 17, 2025
-
-### Bug Fixes
-- **Fixed "Bash is not defined" Error**: Resolved critical issue where built-in tools were not properly injected into execution context
-- **MCP Server Configuration**: Fixed missing `builtInTools` MCP server configuration in test environments
-- **Tool Injection**: Enhanced execution worker tool injection mechanism for proper tool availability
-- **Dependency Resolution**: Improved module resolution and error handling for built-in tools
-
-### Testing & Validation
-- Added comprehensive test suite covering:
-  - MCP server initialization and tool listing
-  - Execution worker tool injection
-  - Code-mode integration testing
-  - Complete workflow validation
-  - Edge case and error handling
-- All core files pass syntax validation
-- Verified Bash tool availability and functionality
-
-## Latest Enhancements
-
-### Comprehensive Colored Output
-- Added `chalk` for terminal colors and styling
-- Added `highlight.js` for syntax highlighting of code blocks
-- Implemented comprehensive output formatting with sections, headers, and visual separators
-- Color-coded different output types:
-  - **Yellow**: Thinking blocks (💭)
-  - **Green**: Responses and completions (✓)
-  - **Blue**: Tool usage (🔧)
-  - **Red**: Errors (✗)
-  - **Gray**: Meta information and borders
-
-### Extended Thinking Support
-- Enabled Claude's extended thinking mode with 10,000 token budget
-- Real-time streaming of thinking process with `thinking_delta` events
-- Visual display of thinking blocks with borders and numbering
-- Comprehensive event handling for all message types
-
-### Dynamic Tool Descriptions
-- Created `getBuiltInToolSchemas()` to define tool schemas programmatically
-- Updated `generateMCPFunctions()` to collect and return tool descriptions
-- Execute tool description now dynamically includes:
-  - All built-in functions (Read, Write, Edit, Glob, Grep, Bash, LS, TodoWrite)
-  - All MCP tools organized by server (glootie, playwright, vexify)
-  - Complete parameter lists and descriptions for each tool
-
-### Configuration Management
-- Added `--nomcp` flag support to disable MCP tools
-- Updated config loading to check directories in priority order:
-  1. Current working directory (`./.codemode.json`)
-  2. Library directory (`/path/to/codemode/.codemode.json`)
-  3. User home directory (`~/.claude/.codemode.json`)
-- Comprehensive logging of config loading process
-
-### Code Formatting
-- Line-numbered code blocks with syntax highlighting
-- Support for multiple programming languages
-- Color-coded tokens:
-  - Keywords (magenta)
-  - Strings (green)
-  - Numbers (yellow)
-  - Comments (gray)
-  - Functions (blue/cyan)
-  - Operators (white)
-
-### Event Handling
-- Comprehensive streaming event processing:
-  - `text`: Regular text messages
-  - `thinking_delta`/`thinking`: Thinking blocks with real-time streaming
-  - `assistant`: Assistant responses with content blocks
-  - `tool_result`: Tool execution results with previews
-  - `error`: Error messages with stack traces
-- Real-time progress updates during agent execution
-
-### Error Handling
-- Enhanced error display with colored output
-- Stack trace inclusion for debugging
-- Clear error messages with visual separators
-
-## Features
-
-### Built-in Functions (Dynamically Documented)
-- **Read(file_path, offset?, limit?)**: Read file content with line numbers
-- **Write(file_path, content)**: Write/overwrite files with directory creation
-- **Edit(file_path, old_string, new_string, replace_all?)**: Exact string replacement
-- **Glob(pattern, path?)**: File pattern matching
-- **Grep(pattern, path?, options?)**: Ripgrep-powered content search
-- **Bash(command, description?, timeout?)**: Shell command execution
-- **LS(path?, show_hidden?, recursive?)**: Directory listing
-- **TodoWrite(todos)**: Task tracking and progress display
-
-### MCP Integration (Dynamically Documented)
-- **glootie**: Code execution, AST analysis, caveat management
-- **playwright**: 20+ browser automation tools
-- **vexify**: Semantic code search
-
-## Usage
-
-```bash
-# Basic usage
-npx codemode-agent --agent "Your task here"
-
-# Disable MCP tools
-npx codemode-agent --agent "Your task here" --nomcp
-
-# MCP server mode
-npx codemode-agent --mcp
-```
-
-## Technical Details
-
-### Dependencies
-- `@anthropic-ai/claude-agent-sdk`: Agent framework
-- `@modelcontextprotocol/sdk`: MCP protocol support
-- `chalk`: Terminal colors (v5.3.0+)
-- `highlight.js`: Syntax highlighting
-- `fast-glob`: File pattern matching
-- `chokidar`: File watching
-- `uuid`: Unique identifiers
-- `which`: Command resolution
-- `zod`: Schema validation
-
-### Architecture
-1. **cli.js**: Entry point routing to agent or MCP mode
-2. **agent.js**: Claude agent with streaming, thinking, and colored output
-3. **code-mode.js**: MCP server exposing execute tool with dynamic function injection
-
-### Configuration
-`.codemode.json` structure:
-```json
-{
-  "mcpServers": {
-    "glootie": {
-      "command": "npx",
-      "args": ["-y", "mcp-glootie@latest"]
-    },
-    "playwright": {
-      "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"]
-    },
-    "vexify": {
-      "command": "npx",
-      "args": ["-y", "vexify@latest", "mcp"]
-    }
-  }
-}
-```
-
-## Implementation Notes
-
-### Thinking Mode
-Extended thinking is enabled with a 10,000 token budget, allowing Claude to show its reasoning process in real-time. This provides visibility into the agent's decision-making and problem-solving approach.
-
-### Dynamic Tool Descriptions
-Tool descriptions are generated at runtime by:
-1. Querying each MCP server for its tools
-2. Extracting tool schemas from built-in function definitions
-3. Formatting descriptions with parameter lists and documentation
-4. Combining into comprehensive execute tool description
-
-This ensures tool documentation stays in sync with implementation and allows for easy extension with new tools.
-
-### Color Scheme
-The color scheme is designed for readability on both light and dark terminals:
-- Bold colors for headers and important information
-- Gray for borders and meta information
-- Semantic colors (green for success, red for errors, yellow for warnings)
-- Syntax highlighting follows standard conventions
-
-## Version History
-
-### 1.0.13 (Current)
-- Added comprehensive colored output with chalk and highlight.js
-- Enabled extended thinking mode with real-time streaming
-- Implemented dynamic tool descriptions
-- Enhanced configuration management with --nomcp flag
-- Improved event handling and error display
-- Updated documentation and examples
+    1→# CodeMode Agent Changelog
+    2→
+    3→## Version 2.0.19 - October 17, 2025
+    4→
+    5→### Breaking Changes
+    6→- **Object-Based MCP Tool API**: All MCP tools now use object notation
+    7→  - Tools are organized by server name: `serverName.toolName(params)`
+    8→  - Examples: `builtInTools.Bash('ls')`, `playwright.browser_navigate('https://example.com')`
+    9→  - Removes all prefixes for cleaner, more intuitive API
+   10→  - **Migration**: Update `toolName()` calls to `serverName.toolName()`
+   11→
+   12→### Architecture Changes
+   13→- **Simplified Tool Exposure**: Only `execute` tool is exposed to agents
+   14→  - All MCP tools available as functions within execute context
+   15→  - Dynamic tool description lists all available tools by server
+   16→  - Removed standalone `createWindow` tool (use `playwright.browser_navigate` directly)
+   17→
+   18→### Improvements
+   19→- Enhanced execute tool description with dynamic MCP tool listing
+   20→- Added usage examples in tool description
+   21→- Improved tool organization and discoverability
+   22→- Better namespace management prevents naming conflicts
+   23→
+   24→## Version 2.0.18 - October 17, 2025
+   25→
+   26→### New Features
+   27→- **Added createWindow Tool**: New convenience tool for creating browser windows with Playwright
+   28→  - `mcp__codeMode__createWindow(url, width, height)`
+   29→  - Automatically resizes browser and navigates to specified URL
+   30→  - Simplifies common browser automation workflows
+   31→  - Integrates with existing Playwright MCP tools
+   32→
+   33→### Implementation Details
+   34→- Tool added to code-mode.js MCP server
+   35→- Wraps `browser_resize` and `browser_navigate` Playwright tools
+   36→- Default dimensions: 1280x720 pixels
+   37→- Proper error handling and validation
+   38→
+   39→## Version 2.0.17 - October 17, 2025
+   40→
+   41→### Bug Fixes
+   42→- **Fixed "Bash is not defined" Error**: Resolved critical issue where built-in tools were not properly injected into execution context
+   43→- **MCP Server Configuration**: Fixed missing `builtInTools` MCP server configuration in test environments
+   44→- **Tool Injection**: Enhanced execution worker tool injection mechanism for proper tool availability
+   45→- **Dependency Resolution**: Improved module resolution and error handling for built-in tools
+   46→
+   47→### Testing & Validation
+   48→- Added comprehensive test suite covering:
+   49→  - MCP server initialization and tool listing
+   50→  - Execution worker tool injection
+   51→  - Code-mode integration testing
+   52→  - Complete workflow validation
+   53→  - Edge case and error handling
+   54→- All core files pass syntax validation
+   55→- Verified Bash tool availability and functionality
+   56→
+   57→## Latest Enhancements
+   58→
+   59→### Comprehensive Colored Output
+   60→- Added `chalk` for terminal colors and styling
+   61→- Added `highlight.js` for syntax highlighting of code blocks
+   62→- Implemented comprehensive output formatting with sections, headers, and visual separators
+   63→- Color-coded different output types:
+   64→  - **Yellow**: Thinking blocks (💭)
+   65→  - **Green**: Responses and completions (✓)
+   66→  - **Blue**: Tool usage (🔧)
+   67→  - **Red**: Errors (✗)
+   68→  - **Gray**: Meta information and borders
+   69→
+   70→### Extended Thinking Support
+   71→- Enabled Claude's extended thinking mode with 10,000 token budget
+   72→- Real-time streaming of thinking process with `thinking_delta` events
+   73→- Visual display of thinking blocks with borders and numbering
+   74→- Comprehensive event handling for all message types
+   75→
+   76→### Dynamic Tool Descriptions
+   77→- Created `getBuiltInToolSchemas()` to define tool schemas programmatically
+   78→- Updated `generateMCPFunctions()` to collect and return tool descriptions
+   79→- Execute tool description now dynamically includes:
+   80→  - All built-in functions (Read, Write, Edit, Glob, Grep, Bash, LS, TodoWrite)
+   81→  - All MCP tools organized by server (glootie, playwright, vexify)
+   82→  - Complete parameter lists and descriptions for each tool
+   83→
+   84→### Configuration Management
+   85→- Added `--nomcp` flag support to disable MCP tools
+   86→- Updated config loading to check directories in priority order:
+   87→  1. Current working directory (`./.codemode.json`)
+   88→  2. Library directory (`/path/to/codemode/.codemode.json`)
+   89→  3. User home directory (`~/.claude/.codemode.json`)
+   90→- Comprehensive logging of config loading process
+   91→
+   92→### Code Formatting
+   93→- Line-numbered code blocks with syntax highlighting
+   94→- Support for multiple programming languages
+   95→- Color-coded tokens:
+   96→  - Keywords (magenta)
+   97→  - Strings (green)
+   98→  - Numbers (yellow)
+   99→  - Comments (gray)
+  100→  - Functions (blue/cyan)
+  101→  - Operators (white)
+  102→
+  103→### Event Handling
+  104→- Comprehensive streaming event processing:
+  105→  - `text`: Regular text messages
+  106→  - `thinking_delta`/`thinking`: Thinking blocks with real-time streaming
+  107→  - `assistant`: Assistant responses with content blocks
+  108→  - `tool_result`: Tool execution results with previews
+  109→  - `error`: Error messages with stack traces
+  110→- Real-time progress updates during agent execution
+  111→
+  112→### Error Handling
+  113→- Enhanced error display with colored output
+  114→- Stack trace inclusion for debugging
+  115→- Clear error messages with visual separators
+  116→
+  117→## Features
+  118→
+  119→### Built-in Functions (Dynamically Documented)
+  120→- **Read(file_path, offset?, limit?)**: Read file content with line numbers
+  121→- **Write(file_path, content)**: Write/overwrite files with directory creation
+  122→- **Edit(file_path, old_string, new_string, replace_all?)**: Exact string replacement
+  123→- **Glob(pattern, path?)**: File pattern matching
+  124→- **Grep(pattern, path?, options?)**: Ripgrep-powered content search
+  125→- **Bash(command, description?, timeout?)**: Shell command execution
+  126→- **LS(path?, show_hidden?, recursive?)**: Directory listing
+  127→- **TodoWrite(todos)**: Task tracking and progress display
+  128→
+  129→### MCP Integration (Dynamically Documented)
+  130→- **glootie**: Code execution, AST analysis, caveat management
+  131→- **playwright**: 20+ browser automation tools
+  132→- **vexify**: Semantic code search
+  133→
+  134→## Usage
+  135→
+  136→```bash
+  137→# Basic usage
+  138→npx codemode-agent --agent "Your task here"
+  139→
+  140→# Disable MCP tools
+  141→npx codemode-agent --agent "Your task here" --nomcp
+  142→
+  143→# MCP server mode
+  144→npx codemode-agent --mcp
+  145→```
+  146→
+  147→## Technical Details
+  148→
+  149→### Dependencies
+  150→- `@anthropic-ai/claude-agent-sdk`: Agent framework
+  151→- `@modelcontextprotocol/sdk`: MCP protocol support
+  152→- `chalk`: Terminal colors (v5.3.0+)
+  153→- `highlight.js`: Syntax highlighting
+  154→- `fast-glob`: File pattern matching
+  155→- `chokidar`: File watching
+  156→- `uuid`: Unique identifiers
+  157→- `which`: Command resolution
+  158→- `zod`: Schema validation
+  159→
+  160→### Architecture
+  161→1. **cli.js**: Entry point routing to agent or MCP mode
+  162→2. **agent.js**: Claude agent with streaming, thinking, and colored output
+  163→3. **code-mode.js**: MCP server exposing execute tool with dynamic function injection
+  164→
+  165→### Configuration
+  166→`.codemode.json` structure:
+  167→```json
+  168→{
+  169→  "mcpServers": {
+  170→    "glootie": {
+  171→      "command": "npx",
+  172→      "args": ["-y", "mcp-glootie@latest"]
+  173→    },
+  174→    "playwright": {
+  175→      "command": "npx",
+  176→      "args": ["-y", "@playwright/mcp@latest"]
+  177→    },
+  178→    "vexify": {
+  179→      "command": "npx",
+  180→      "args": ["-y", "vexify@latest", "mcp"]
+  181→    }
+  182→  }
+  183→}
+  184→```
+  185→
+  186→## Implementation Notes
+  187→
+  188→### Thinking Mode
+  189→Extended thinking is enabled with a 10,000 token budget, allowing Claude to show its reasoning process in real-time. This provides visibility into the agent's decision-making and problem-solving approach.
+  190→
+  191→### Dynamic Tool Descriptions
+  192→Tool descriptions are generated at runtime by:
+  193→1. Querying each MCP server for its tools
+  194→2. Extracting tool schemas from built-in function definitions
+  195→3. Formatting descriptions with parameter lists and documentation
+  196→4. Combining into comprehensive execute tool description
+  197→
+  198→This ensures tool documentation stays in sync with implementation and allows for easy extension with new tools.
+  199→
+  200→### Color Scheme
+  201→The color scheme is designed for readability on both light and dark terminals:
+  202→- Bold colors for headers and important information
+  203→- Gray for borders and meta information
+  204→- Semantic colors (green for success, red for errors, yellow for warnings)
+  205→- Syntax highlighting follows standard conventions
+  206→
+  207→## Version History
+  208→
+  209→### 1.0.13 (Current)
+  210→- Added comprehensive colored output with chalk and highlight.js
+  211→- Enabled extended thinking mode with real-time streaming
+  212→- Implemented dynamic tool descriptions
+  213→- Enhanced configuration management with --nomcp flag
+  214→- Improved event handling and error display
+  215→- Updated documentation and examples
+  216→

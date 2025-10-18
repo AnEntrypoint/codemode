@@ -10,7 +10,8 @@
   },
   "scripts": {
     "start": "node agent.js --agent",
-    "dev": "node --watch agent.js"
+    "dev": "node --watch agent.js",
+    "test": "node test.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.19",

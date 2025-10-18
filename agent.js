@@ -161,31 +161,34 @@ const agentPrompt = `You are an AI assistant with access to an execute tool that
 
 # Execute Tool persistent-context repl interface with extra tools, execute provides these functions that you can call in your JavaScript code:
 
+IMPORTANT: Use the global function names directly (Read, Write, LS, etc.) NOT builtInTools.Read or builtInTools.Write
+Relative paths are automatically resolved to the working directory.
+
 ## File Operations
-Read(path, offset?, limit?) Read file content with optional offset and limit
-Write(path, content) Write content to file
-Edit(path, oldString, newString, replaceAll?) Edit file by replacing strings
-Glob(pattern, path?) Find files matching glob pattern
+await Read(path, offset?, limit?) Read file content with optional offset and limit
+await Write(path, content) Write content to file
+await Edit(path, oldString, newString, replaceAll?) Edit file by replacing strings
+await Glob(pattern, path?) Find files matching glob pattern
 
 ## Search Operations
-Grep(pattern, path?, options?) Search for pattern in files using ripgrep
+await Grep(pattern, path?, options?) Search for pattern in files using ripgrep
   Options: {glob, type, output_mode, '-i', '-n', '-A', '-B', '-C', multiline, head_limit}
 
 ## System Operations
-Bash(command, description?, timeout?) Execute shell command
-LS(path?, show_hidden?, recursive?) List directory contents
+await Bash(command, description?, timeout?) Execute shell command
+await LS(path?, show_hidden?, recursive?) List directory contents
 
 ## Web Operations
-WebFetch(url, prompt) Fetch and analyze web content
-WebSearch(query, allowed_domains?, blocked_domains?) Search the web
+await WebFetch(url, prompt) Fetch and analyze web content
+await WebSearch(query, allowed_domains?, blocked_domains?) Search the web
 
 ## Task Management
-TodoWrite(todos) Write todo list
+await TodoWrite(todos) Write todo list
   Format: [{content, status, activeForm}] where status is 'pending'|'in_progress'|'completed'
 
 ## MCP Tools (from configured servers)
-All MCP tools from glootie, playwright, and vexify are also available as functions.
-Use browser automation, code analysis, and semantic search tools as needed.
+All MCP tools from glootie, playwright, and vexify are also available via their namespaces.
+Use browser automation (playwright.*), code analysis (glootie.*), and semantic search (vexify.*) as needed.
 
 # Instructions
 
@@ -196,6 +199,7 @@ Write code that completes the entire task, use as many executions as you need to
 All MCP tools are async functions. Always use "await" when calling them.
 Before asking the user to do something, first check if you can do it yourself or with any of your tools
 Always apply all code changes to the codebase before finishing
+Your real time environment can import parts of the codebase, use that to isolate each part and test if it works during debugging
 Mandatory: always continuously update and maintain the todo list as a plan to complete the entire requested task, keep working and updating it till the entire task is complete
 
 # CRITICAL: Console Logging Guidelines
