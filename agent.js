@@ -271,7 +271,7 @@ async function runAgent() {
               type: 'stdio',
               command: 'node',
               args: [dirname(__filename) + '/code-mode.js'],
-              cwd: __dirname
+              cwd: process.cwd()
             }
           }
         }
@@ -482,5 +482,24 @@ async function runAgent() {
     process.exit(1);
   }
 }
+
+// Handle Ctrl-C and termination signals
+process.on('SIGINT', () => {
+  console.log('');
+  console.log(chalk.yellow.bold('⚠ Received SIGINT (Ctrl-C), shutting down...'));
+  if (interactiveMode) {
+    interactiveMode.cleanup();
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('');
+  console.log(chalk.yellow.bold('⚠ Received SIGTERM, shutting down...'));
+  if (interactiveMode) {
+    interactiveMode.cleanup();
+  }
+  process.exit(0);
+});
 
 runAgent();

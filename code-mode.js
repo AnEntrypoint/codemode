@@ -69,7 +69,7 @@ class MCPServerManager {
     try {
       proc = spawn(serverConfig.command, serverConfig.args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: __dirname
+        cwd: process.cwd()
       });
       console.error(`[MCP Manager]   Process spawned with PID: ${proc.pid}`);
     } catch (error) {
@@ -195,7 +195,14 @@ class MCPServerManager {
   shutdown() {
     for (const [serverName, serverState] of this.servers) {
       console.error(`[MCP Manager] Shutting down ${serverName}`);
-      serverState.process.kill();
+      try {
+        serverState.process.kill('SIGTERM');
+        setTimeout(() => {
+          if (!serverState.process.killed) {
+            serverState.process.kill('SIGKILL');
+          }
+        }, 1000);
+      } catch (error) {}
     }
     this.servers.clear();
   }
@@ -480,7 +487,14 @@ global.Grep = async (pattern, grepPath, options) => await builtInTools.Grep({ pa
   shutdown() {
     if (this.worker) {
       console.error('[Execution Context] Shutting down worker');
-      this.worker.kill();
+      try {
+        this.worker.kill('SIGTERM');
+        setTimeout(() => {
+          if (this.worker && !this.worker.killed) {
+            this.worker.kill('SIGKILL');
+          }
+        }, 1000);
+      } catch (error) {}
       this.worker = null;
     }
   }
@@ -606,9 +620,13 @@ async function main() {
   // Handle shutdown
   const shutdown = () => {
     console.error('[Execute Server] Shutting down...');
-    executionContext.shutdown();
+    if (executionContext) {
+      executionContext.shutdown();
+    }
     mcpManager.shutdown();
-    process.exit(0);
+    setTimeout(() => {
+      process.exit(0);
+    }, 1500);
   };
 
   process.on('SIGINT', shutdown);

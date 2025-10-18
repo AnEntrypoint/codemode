@@ -233,4 +233,14 @@ global.__callMCPTool = async (serverName, toolName, args) => {
   });
 };
 
+process.on('SIGINT', () => {
+  originalConsoleLog('[Execution worker] Received SIGINT, shutting down...');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  originalConsoleLog('[Execution worker] Received SIGTERM, shutting down...');
+  process.exit(0);
+});
+
 originalConsoleLog('[Execution worker ready]');

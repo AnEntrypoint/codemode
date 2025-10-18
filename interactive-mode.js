@@ -50,7 +50,6 @@ class InteractiveMode {
     const self = this;
 
     this.rl._writeToOutput = function(stringToWrite) {
-      // Show input even when paused, but don't process it until resumed
       if (stringToWrite.length > 0 && stringToWrite !== '\r\n') {
         const currentLine = this.line || '';
         if (currentLine.length > 0 && !self.isInputVisible) {
@@ -63,17 +62,33 @@ class InteractiveMode {
       originalWrite.apply(this, arguments);
     };
 
-    // Handle Ctrl-C on readline interface
     this.rl.on('SIGINT', () => {
       this.cleanup();
       process.exit(0);
     });
 
-    // Also handle Ctrl-C on process level (backup handler)
     process.on('SIGINT', () => {
       this.cleanup();
       process.exit(0);
     });
+
+    process.stdin.on('keypress', (str, key) => {
+      if (key && key.name === 'escape') {
+        if (self.isInputVisible) {
+          self.clearInputArea();
+          self.isInputVisible = false;
+          self.currentInput = '';
+          self.rl.line = '';
+          self.rl.cursor = 0;
+          self.rl.setPrompt('');
+        }
+      }
+    });
+
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+      readline.emitKeypressEvents(process.stdin);
+    }
   }
 
   showInputArea() {
@@ -122,6 +137,11 @@ class InteractiveMode {
     if (this.isInputVisible) {
       this.clearInputArea();
       this.isInputVisible = false;
+    }
+    if (process.stdin.isTTY) {
+      try {
+        process.stdin.setRawMode(false);
+      } catch (e) {}
     }
     if (this.rl) {
       this.rl.close();

@@ -71,7 +71,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             pattern: { type: 'string', description: 'Glob pattern (e.g., "**/*.js", "src/**/*.ts")' },
-            path: { type: 'string', description: 'Directory to search in (optional, defaults to working directory)' }
+            path: { type: 'string', description: 'Directory to search in (optional, defaults to working directory)' },
+            as_array: { type: 'boolean', description: 'Return results as array instead of string (default: false)' }
           },
           required: ['pattern']
         }
@@ -315,7 +316,7 @@ async function handleEdit(args) {
 }
 
 async function handleGlob(args) {
-  const { pattern, path } = args;
+  const { pattern, path, as_array = false } = args;
   const cwd = path ? resolvePath(process.cwd(), path) : process.cwd();
 
   const files = await fg(pattern, {
@@ -330,12 +331,17 @@ async function handleGlob(args) {
     .sort((a, b) => b.stats.mtimeMs - a.stats.mtimeMs)
     .map(entry => typeof entry === 'string' ? entry : entry.path);
 
-  let result = sortedFiles.length > 0 ? sortedFiles.join('\n') : 'No files matched';
-  if (result.length > 30000) {
-    result = result.substring(0, 30000);
+  if (as_array) {
+    // Return JSON array for programmatic use
+    return JSON.stringify(sortedFiles.slice(0, 1000));
+  } else {
+    // Return string representation (original behavior)
+    let result = sortedFiles.length > 0 ? sortedFiles.join('\n') : 'No files matched';
+    if (result.length > 30000) {
+      result = result.substring(0, 30000);
+    }
+    return result;
   }
-
-  return result;
 }
 
 async function handleGrep(args) {

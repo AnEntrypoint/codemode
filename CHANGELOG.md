@@ -1,5 +1,107 @@
 # CodeMode Agent Changelog
 
+## 2025-10-19 (v2.0.41)
+
+### Critical Fixes - npx Working Directory & Signal Handling
+
+**Fixed**: Multiple critical issues when running via npx
+
+#### Issues Fixed
+
+1. **Working Directory Issue (npx)**
+   - MCP servers spawned with `cwd: __dirname` instead of `process.cwd()`
+   - When running via npx, __dirname points to npm cache directory
+   - Execute tool ran in wrong directory (/home/user/.npm/_npx/.../node_modules/codemode-agent)
+   - Fixed in agent.js:274 and code-mode.js:72
+
+2. **Ctrl-C Not Working in Agent Mode**
+   - No SIGINT/SIGTERM handlers in agent.js
+   - Ctrl-C had no effect while agent was running
+   - Added signal handlers with proper cleanup
+   - Interactive mode cleanup on exit
+
+3. **Glob Tool Returns String Instead of Array**
+   - Glob returned newline-separated string, confusing for programmatic use
+   - Added `as_array` parameter (like LS tool)
+   - When `as_array: true`, returns JSON array
+   - Maintains backward compatibility with string format
+
+#### Files Modified
+- agent.js: Fixed cwd to process.cwd(), added SIGINT/SIGTERM handlers
+- code-mode.js: Fixed MCP server spawn cwd to process.cwd()
+- built-in-tools-mcp.js: Added as_array parameter to Glob tool
+
+#### Testing
+- ✅ Execute tool runs in correct working directory when using npx
+- ✅ Ctrl-C properly terminates agent and cleans up
+- ✅ Glob with as_array returns JSON array
+- ✅ Glob without as_array maintains string format
+
+## 2025-10-18 (v2.0.40)
+
+### New Features - Escape Key & Enhanced Signal Handling
+
+**Added**: Escape key support to hide typing prompt in interactive mode
+
+#### Escape Key Feature
+- Press Escape to hide the input prompt and clear the current line
+- Allows clean output viewing without visual clutter
+- Automatically shows prompt again when user starts typing
+- Integrated with existing readline interface using raw mode
+
+#### Enhanced Signal Handling
+- Added SIGINT/SIGTERM handlers to execution-worker.js
+- Improved shutdown process in code-mode.js for MCP servers
+- Enhanced ExecutionContextManager shutdown with proper signal forwarding
+- Added timeout-based graceful shutdown (SIGTERM → SIGKILL fallback)
+- All child processes now receive proper shutdown signals
+
+#### Files Modified
+- interactive-mode.js: Added Escape key handler, raw mode setup, keypress events
+- execution-worker.js: Added SIGINT/SIGTERM handlers
+- code-mode.js: Enhanced shutdown methods with SIGTERM/SIGKILL handling
+- README.md: Complete rewrite with all features, keyboard shortcuts, architecture
+
+#### Technical Changes
+- Raw mode enabled on stdin for keypress event detection
+- Keypress events emit for all keyboard input
+- Escape key clears line buffer and hides prompt
+- Signal handlers use try-catch for error resilience
+- Shutdown includes 1.5s delay for child process cleanup
+
+#### Testing
+- ✅ Escape key hides prompt and clears input
+- ✅ Ctrl-C gracefully shuts down all processes
+- ✅ SIGTERM forwarded to worker and MCP servers
+- ✅ All processes exit cleanly with proper cleanup
+
+## 2025-10-18 (v2.0.39)
+
+### Critical Fix - Ctrl-C Signal Handling
+
+**Fixed**: Ctrl-C not working in interactive mode during agent execution
+
+#### Issue
+- When agent was executing tasks, `interactiveMode.pause()` called `rl.pause()`
+- `rl.pause()` stops readline from reading stdin
+- When stdin not being read, Ctrl-C signals not detected by readline
+- Users could not interrupt agent execution with Ctrl-C
+
+#### Solution
+- Removed `rl.pause()` call from `pause()` method
+- Removed `rl.resume()` call from `resume()` method
+- Keep readline active at all times to detect signals
+- `isPaused` flag preserved for future functionality control
+
+#### Files Modified
+- interactive-mode.js (98 lines)
+
+#### Technical Changes
+- Readline stays active even during agent execution
+- Ctrl-C signals detected continuously
+- SIGINT handler on readline interface can fire at any time
+- Input and signal handling work normally throughout session
+
 ## 2025-10-18 (v2.0.38)
 
 ### Critical Fix - Object.assign Read-Only Property Error
