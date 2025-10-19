@@ -3,7 +3,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import chalk from 'chalk';
 import hljs from 'highlight.js';
@@ -72,6 +72,9 @@ if (!isAgentMode) {
 
 const filteredArgs = args.filter(arg => arg !== '--agent' && arg !== '--no-interactive');
 const task = filteredArgs.length > 0 ? filteredArgs.join(' ') : 'Clean up this codebase';
+
+// Preserve the original working directory before it gets reset during execution
+const originalCwd = process.cwd();
 
 let interactiveMode = null;
 if (!isNonInteractive) {
@@ -282,37 +285,93 @@ async function runAgent() {
         interactiveMode.pause();
       }
 
-      const agentQuery = query({
-        prompt: taskPrompt,
-        options: {
-          model: 'sonnet',
-          permissionMode: 'bypassPermissions',
-          allowedTools: ['mcp__codeMode__execute'],
-          disallowedTools: [
-            'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Read', 'Edit', 'Write',
-            'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell',
-            'SlashCommand', 'Skill'
-          ],
-          thinking: {
-            type: 'enabled',
-            budget_tokens: 10000
-          },
-          mcpServers: {
-            codeMode: {
-              type: 'stdio',
-              command: 'node',
-              args: [dirname(__filename) + '/code-mode.js'],
-              cwd: process.cwd()
+      console.log('🔍 Starting task execution...');
+      console.log(`📝 Task prompt: ${taskPrompt.substring(0, 100)}...`);
+
+      // Use the task prompt from the agent
+      console.log('🎯 Using task prompt with working directory fix...');
+      const testPrompt = taskPrompt;
+
+      try {
+        console.log('🔧 Creating agent query with proper MCP server configuration...');
+        console.log(`📁 MCP server will run from: ${originalCwd}`);
+        console.log('🔧 Only execute tool is allowed - all other tools disabled');
+
+        // CRITICAL FIX: Restore working directory before creating query
+        process.chdir(originalCwd);
+        console.log(`🔄 Restored working directory to: ${process.cwd()}`);
+
+        console.log('🚀 About to create Claude SDK query...');
+
+      let agentQuery;
+      try {
+        agentQuery = query({
+          prompt: testPrompt, // Use original task for testing
+          options: {
+            model: 'claude-sonnet-4-5',
+            permissionMode: 'bypassPermissions',
+            // FIXED: Only allow the execute tool
+            allowedTools: ['mcp__codeMode__execute'],
+            disallowedTools: [
+              'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Read', 'Edit', 'Write',
+              'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell',
+              'SlashCommand', 'Skill'
+            ],
+            thinking: {
+              type: 'enabled',
+              budget_tokens: 10000
+            },
+            mcpServers: {
+              codeMode: {
+                type: 'stdio',
+                command: 'node',
+                args: [dirname(__filename) + '/code-mode.js'],
+                cwd: originalCwd
+              }
             }
           }
-        }
-      });
+        });
+
+        console.log('✅ Claude SDK query created successfully!');
+      } catch (queryError) {
+        console.error('❌ Claude SDK query creation failed:', queryError.message);
+        console.error('Stack trace:', queryError.stack);
+        throw queryError;
+      }
+
+      console.log('🚀 Agent query created, starting to iterate messages...');
+      console.log('⏳ Waiting for first message from agent...');
 
       let currentThinkingBlock = '';
       let isThinking = false;
       let thinkingBlockCount = 0;
+      let messageCount = 0;
+      let hasReceivedMessage = false;
 
-      for await (const message of agentQuery) {
+      // Add timeout to detect if we're hanging
+      const messageTimeout = setTimeout(() => {
+        if (!hasReceivedMessage) {
+          console.log('⚠️  No messages received within 10 seconds - this indicates a communication issue');
+          console.log('🔧 Possible causes:');
+          console.log('   - MCP server not starting properly');
+          console.log('   - Tool not being registered correctly');
+          console.log('   - Query configuration issue');
+          console.log('🚨 CRITICAL: The for-await loop is not iterating at all!');
+        }
+      }, 10000);
+
+      console.log('🔄 About to enter for-await loop...');
+      console.log('🔍 DEBUG: agentQuery type:', typeof agentQuery);
+      console.log('🔍 DEBUG: agentQuery is async iterable:', Symbol.asyncIterator in agentQuery);
+
+      try {
+        for await (const message of agentQuery) {
+        if (!hasReceivedMessage) {
+          clearTimeout(messageTimeout);
+          hasReceivedMessage = true;
+        }
+        messageCount++;
+        console.log(`📨 Received message ${messageCount}: ${message.type}`);
         if (message.type === 'text') {
           console.log(message.text);
         } else if (message.type === 'thinking_delta' || message.type === 'thinking') {
@@ -459,17 +518,35 @@ async function runAgent() {
         }
       }
 
+      } catch (loopError) {
+        console.error('❌ ERROR in for-await loop:', loopError.message);
+        console.error('Stack trace:', loopError.stack);
+        console.log('🚨 This is why the agent is exiting prematurely!');
+      } finally {
+        clearTimeout(messageTimeout);
+      }
+
       if (isThinking) {
         console.log('');
         console.log(chalk.gray('└─────────────────────────────────────────────'));
         console.log('');
       }
 
+      console.log(`✅ Task execution completed. Total messages received: ${messageCount}`);
+
       if (interactiveMode) {
         interactiveMode.resume();
       }
+      } catch (error) {
+        console.error('❌ Task execution failed:', error);
+        console.error('Stack trace:', error.stack);
+        if (interactiveMode) {
+          interactiveMode.resume();
+        }
+      }
     }
 
+    // FIXED: Use proper agent prompt now that working directory is fixed
     await executeTask(agentPrompt);
 
     if (!isNonInteractive) {
