@@ -1,5 +1,49 @@
 # CodeMode Agent Changelog
 
+## 2025-10-19 (v2.0.51)
+
+### Bug Fix - Async Execution System Structural Issues
+
+**Fixed**: Removed timeout confusion and cleaned up execution environment
+
+#### Issues Resolved
+- **Execution environment pollution**: Removed async management functions from global scope
+- **Timeout confusion**: Fixed async management actions to return actual data instead of confirmation messages
+- **Poor UX**: Enhanced async handover with real-time monitoring capabilities
+
+#### Key Changes
+- **Clean execution environment**: Removed `get_async_execution`, `list_async_executions`, `kill_execution` from global scope
+- **Proper data returns**: Async management actions now wait for and return actual execution data
+- **Better monitoring**: `list_async_executions` shows duration, history count, and detailed status
+- **Real-time progress**: `get_async_log` and `get_progress` return timestamped execution data
+
+#### Management Interface
+```javascript
+// List async executions - returns actual data
+await execute({ action: "list_async_executions" });
+// Result: "Async Executions (1):\n- Execution 1: Started 2025-10-19T18:20:34.583Z, Duration: 65s, History entries: 7"
+
+// Get execution log - returns full history
+await execute({ action: "get_async_log", executionId: "1" });
+// Result: "Async Execution 1:\n\n[2025-10-19T18:20:34.584Z] Starting task..."
+
+// Get progress since timestamp
+await execute({ action: "get_progress", executionId: "1", since: "2025-10-19T18:21:00.000Z" });
+```
+
+#### Technical Improvements
+- Implemented Promise-based async action handlers that wait for worker responses
+- Enhanced async handover messages with detailed progress information
+- Updated execution worker startup messages to reflect cleaner design
+- Fixed message routing for async management operations
+- Removed 84 lines of code pollution from execution environment
+
+#### Test Results
+- ✅ Quick executions complete immediately without confusion
+- ✅ Async handover works seamlessly after 30 seconds
+- ✅ Management actions return actual data instead of confirmations
+- ✅ Clean execution environment with no function pollution
+
 ## 2025-10-19 (v2.0.50)
 
 ### Major Feature - Async Execution Handover System

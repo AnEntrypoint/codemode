@@ -172,7 +172,7 @@ process.on('message', (msg) => {
     }
   } else if (msg.type === 'KILL_EXECUTION') {
     // Kill a running or async execution
-    const { execId } = msg;
+    const execId = msg.execId;
     let killed = false;
     let error = null;
 
@@ -216,7 +216,7 @@ process.on('message', (msg) => {
     process.send({ type: 'EXECUTION_KILLED', execId, success: killed, error, killedCount: execId ? null : Array.from(runningExecutions.keys()).length + Array.from(asyncExecutions.keys()).length });
   } else if (msg.type === 'GET_ASYNC_EXECUTION') {
     // Get async execution details
-    const { execId } = msg;
+    const execId = msg.execId;
     if (asyncExecutions.has(execId)) {
       const execution = asyncExecutions.get(execId);
       process.send({
@@ -228,8 +228,11 @@ process.on('message', (msg) => {
           workingDirectory: execution.workingDirectory,
           startTime: execution.startTime,
           asyncStartTime: execution.asyncStartTime,
+          completionTime: execution.completionTime,
           outputHistory: execution.outputHistory,
-          isKilled: execution.killed
+          isKilled: execution.killed,
+          completed: execution.completed,
+          error: execution.error
         }
       });
     } else {
@@ -278,7 +281,8 @@ process.on('message', (msg) => {
     process.send({ type: 'SERVER_STATE', state });
   } else if (msg.type === 'CLEAR_ASYNC_HISTORY') {
     // Clear output history for async execution
-    const { execId, clearHistory } = msg;
+    const execId = msg.execId;
+    const clearHistory = msg.clearHistory;
     if (asyncExecutions.has(execId)) {
       const execution = asyncExecutions.get(execId);
       if (clearHistory) {
@@ -299,7 +303,8 @@ process.on('message', (msg) => {
     }
   } else if (msg.type === 'GET_ASYNC_PROGRESS') {
     // Get progress for async execution since a specific time
-    const { execId, since } = msg;
+    const execId = msg.execId;
+    const since = msg.since;
     if (asyncExecutions.has(execId)) {
       const execution = asyncExecutions.get(execId);
       let outputHistory = execution.outputHistory;
@@ -329,7 +334,9 @@ process.on('message', (msg) => {
       });
     }
   } else if (msg.type === 'EXECUTE') {
-    const { execId, code, workingDirectory } = msg;
+    const execId = msg.execId;
+    const code = msg.code;
+    const workingDirectory = msg.workingDirectory;
 
     (async () => {
       startCapture(execId);
@@ -452,6 +459,14 @@ process.on('message', (msg) => {
 
         // Clean up execution tracking
         runningExecutions.delete(execId);
+        // Don't delete from asyncExecutions - keep the history for async management
+
+        // Mark async execution as completed if it exists in async executions
+        if (asyncExecutions.has(execId)) {
+          const asyncExec = asyncExecutions.get(execId);
+          asyncExec.completed = true;
+          asyncExec.completionTime = Date.now();
+        }
 
         process.send({ type: 'EXEC_RESULT', execId, success: true, output });
       } catch (err) {
@@ -459,6 +474,15 @@ process.on('message', (msg) => {
 
         // Clean up execution tracking
         runningExecutions.delete(execId);
+        // Don't delete from asyncExecutions - keep the history for async management
+
+        // Mark async execution as completed with error if it exists in async executions
+        if (asyncExecutions.has(execId)) {
+          const asyncExec = asyncExecutions.get(execId);
+          asyncExec.completed = true;
+          asyncExec.completionTime = Date.now();
+          asyncExec.error = err.message;
+        }
 
         process.send({
           type: 'EXEC_RESULT',

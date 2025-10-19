@@ -12,10 +12,6 @@
     "playwright": {
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
-    },
-    "vexify": {
-      "command": "npx",
-      "args": ["-y", "vexify@latest", "mcp"]
     }
   }
 }
