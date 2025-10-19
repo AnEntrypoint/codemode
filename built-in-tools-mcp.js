@@ -9,6 +9,7 @@ import { join, resolve as resolvePath, dirname, basename } from 'path';
 import fg from 'fast-glob';
 import { Readability } from '@mozilla/readability';
 import fetch from 'node-fetch';
+import ASTLinter, { isAstGrepAvailable } from './ast-grep-wrapper.js';
 
 const server = new Server(
   {
@@ -164,10 +165,107 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ['url']
         }
+      },
+      {
+        name: 'ASTLint',
+        description: 'Universal AST-based linting tool that works across all codebases. Runs on JavaScript, TypeScript, JSX, TSX files and reports only actual issues without false positives.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path to file or directory to lint (relative to working directory)' },
+            recursive: { type: 'boolean', default: true, description: 'Whether to lint directories recursively' },
+            extensions: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'File extensions to lint (default: .js, .jsx, .ts, .tsx, .mjs)'
+            },
+            maxFiles: { type: 'number', default: 100, description: 'Maximum number of files to process' },
+            groupBy: {
+              type: 'string',
+              enum: ['severity', 'file'],
+              default: 'severity',
+              description: 'How to group the linting results'
+            }
+          },
+          required: ['path']
+        }
       }
     ]
   };
 });
+
+// Automatic linting for file operations
+async function runAutoLint(args, operation) {
+  // Only run linting for file modification operations
+  if (!['Write', 'Edit'].includes(operation)) {
+    return null;
+  }
+
+  try {
+    if (!(await isAstGrepAvailable())) {
+      return null;
+    }
+
+    const filePath = args.file_path;
+    if (!filePath) {
+      return null;
+    }
+
+    const targetPath = resolvePath(process.cwd(), filePath);
+
+    if (!existsSync(targetPath)) {
+      return null;
+    }
+
+    const linter = new ASTLinter(process.cwd());
+    const result = await linter.lintFile(targetPath);
+
+    if (!result.available || !result.issues || result.issues.length === 0) {
+      return null; // No issues found
+    }
+
+    const formattedOutput = linter.formatIssues(result.issues, {
+      groupBy: 'severity',
+      includePattern: false
+    });
+
+    return `\n\n🔍 Auto-lint Results (${operation} operation):
+${formattedOutput}`;
+
+  } catch (error) {
+    // Silently fail linting - don't break the main operation
+    return null;
+  }
+}
+
+// Project-wide linting after any execution
+async function runProjectWideLint() {
+  try {
+    if (!(await isAstGrepAvailable())) {
+      return null;
+    }
+
+    const linter = new ASTLinter(process.cwd());
+    const result = await linter.lintProjectWide();
+
+    if (!result.available) {
+      return null;
+    }
+
+    // Only report if there are issues
+    if (!result.mostProblematicFile) {
+      return null; // No issues found across the project
+    }
+
+    const report = linter.formatMostProblematicFileReport(result.mostProblematicFile, result.summary);
+
+    return `\n\n${report}`;
+
+  } catch (error) {
+    // Silently fail project-wide linting
+    return null;
+  }
+}
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
@@ -203,8 +301,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'WebFetch':
         result = await handleWebFetch(args);
         break;
+      case 'ASTLint':
+        result = await handleASTLint(args);
+        break;
       default:
         throw new Error(`Unknown tool: ${name}`);
+    }
+
+    // Run automatic linting for file operations
+    const lintResult = await runAutoLint(args, name);
+    if (lintResult) {
+      result += lintResult;
+    }
+
+    // Run project-wide linting after any execution
+    const projectLintResult = await runProjectWideLint();
+    if (projectLintResult) {
+      result += projectLintResult;
     }
 
     return {
@@ -274,9 +387,58 @@ async function handleWrite(args) {
     mkdirSync(dir, { recursive: true });
   }
 
-  writeFileSync(absPath, content, 'utf8');
+  // ESCAPE-SAFE: Apply MCP corruption protection
+  const safeContent = applyEscapeSafeTransformation(content);
+  writeFileSync(absPath, safeContent, 'utf8');
+
   const action = fileExists ? 'overwrote' : 'created';
-  return `Successfully ${action} file: ${absPath}`;
+  const corruptionProtection = safeContent !== content ? ' with MCP corruption protection' : '';
+  return `Successfully ${action} file: ${absPath}${corruptionProtection}`;
+}
+
+// ESCAPE-SAFE: Transformation function to prevent MCP corruption
+function applyEscapeSafeTransformation(content) {
+  let safeContent = content;
+  let transformationsApplied = [];
+
+  // Replace vulnerable regex literals with RegExp constructors
+  if (safeContent.match(/\/.*\\`.*\/g/)) {
+    safeContent = safeContent.replace(/\/([^/]*\\`[^/]*)\/g/g, (match, pattern) => {
+      const safePattern = pattern.replace(/\\`/g, '\\\\`');
+      transformationsApplied.push('regex-literal-to-constructor');
+      return `new RegExp('${safePattern}', 'g')`;
+    });
+  }
+
+  // Replace vulnerable template literals with safe alternatives
+  if (safeContent.includes('\\`')) {
+    // Convert template literals with escaped backticks to safer patterns
+    safeContent = safeContent.replace(/`([^`]*\\`[^`]*)`/g, (match, innerContent) => {
+      const safeContent = innerContent.replace(/\\`/g, '\\\\`');
+      if (safeContent.includes('${')) {
+        // Keep template literal but fix escapes
+        transformationsApplied.push('template-literal-escape-fix');
+        return `\`${safeContent}\``;
+      } else {
+        // Convert to regular string
+        transformationsApplied.push('template-to-string');
+        return `'${safeContent}'`;
+      }
+    });
+  }
+
+  // Fix nested escape sequences
+  if (safeContent.includes('\\\\\\`')) {
+    safeContent = safeContent.replace(/\\\\\\`/g, '\\\\`');
+    transformationsApplied.push('nested-escape-fix');
+  }
+
+  // Store transformation info for debugging
+  if (transformationsApplied.length > 0) {
+    console.warn(`[MCP Corruption Protection] Applied transformations: ${transformationsApplied.join(', ')}`);
+  }
+
+  return safeContent;
 }
 
 async function handleEdit(args) {
@@ -294,17 +456,20 @@ async function handleEdit(args) {
   let content = readFileSync(absPath, 'utf8');
   const originalContent = content;
 
+  // ESCAPE-SAFE: Apply corruption protection to new_string
+  const safeNewString = applyEscapeSafeTransformation(new_string);
+
   if (replace_all) {
     if (!content.includes(old_string)) {
       throw new Error(`String not found in file: ${old_string}`);
     }
-    content = content.split(old_string).join(new_string);
+    content = content.split(old_string).join(safeNewString);
   } else {
     const index = content.indexOf(old_string);
     if (index === -1) {
       throw new Error(`String not found in file: ${old_string}`);
     }
-    content = content.substring(0, index) + new_string + content.substring(index + old_string.length);
+    content = content.substring(0, index) + safeNewString + content.substring(index + old_string.length);
   }
 
   if (content !== originalContent) {
@@ -535,6 +700,84 @@ async function handleWebFetch(args) {
 
   } catch (error) {
     return `WebFetch error: ${error.message}`;
+  }
+}
+
+async function handleASTLint(args) {
+  const { path, recursive = true, extensions = ['.js', '.jsx', '.ts', '.tsx', '.mjs'], maxFiles = 100, groupBy = 'severity' } = args;
+
+  try {
+    if (!(await isAstGrepAvailable())) {
+      return 'ASTLint: AST functionality is not available on this system. The @ast-grep/napi native binding could not be loaded.';
+    }
+
+    const targetPath = resolvePath(process.cwd(), path);
+
+    if (!existsSync(targetPath)) {
+      return `ASTLint: Path not found: ${targetPath}`;
+    }
+
+    const linter = new ASTLinter(process.cwd());
+
+    let result;
+
+    if (statSync(targetPath).isDirectory()) {
+      // Use project-wide linting for directories
+      result = await linter.lintProjectWide({
+        maxFiles,
+        extensions,
+        workingDirectory: targetPath
+      });
+    } else {
+      result = await linter.lintFile(targetPath);
+      // Normalize format for consistency
+      if (result.issues) {
+        result = {
+          available: result.available,
+          totalIssues: result.issues.length,
+          errors: result.issues.filter(i => i.severity === 'error').length,
+          warnings: result.issues.filter(i => i.severity === 'warning').length,
+          info: result.issues.filter(i => i.severity === 'info').length,
+          files: [targetPath],
+          issues: result.issues
+        };
+      }
+    }
+
+    if (!result.available) {
+      return 'ASTLint: AST linting is not available on this system.';
+    }
+
+    // Handle project-wide linting result format
+    if (result.mostProblematicFile || result.summary !== undefined) {
+      // Project-wide linting result
+      return linter.formatMostProblematicFileReport(result.mostProblematicFile, result.summary);
+    }
+
+    // Single file linting result format
+    if (result.totalIssues === 0) {
+      return '✅ ASTLint: No linting issues found';
+    }
+
+    const formattedOutput = linter.formatIssues(result.issues, {
+      groupBy,
+      includePattern: false
+    });
+
+    const summary = `🔍 AST Linting Results:
+📁 Path: ${targetPath}
+📄 Files scanned: ${result.files.length}
+🚨 Errors: ${result.errors}
+⚠️  Warnings: ${result.warnings}
+ℹ️  Info: ${result.info}
+📊 Total issues: ${result.totalIssues}
+
+`;
+
+    return summary + formattedOutput;
+
+  } catch (error) {
+    return `ASTLint error: ${error.message}`;
   }
 }
 

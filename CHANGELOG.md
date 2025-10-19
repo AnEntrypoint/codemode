@@ -1,5 +1,71 @@
 # CodeMode Agent Changelog
 
+## 2025-10-19 (v2.0.54)
+
+### Debug - Agent Execution Logging
+
+**Added**: Comprehensive debug logging to identify agent execution issues
+
+#### Debug Improvements
+- **Task execution tracking**: Added logging to track task start, query creation, and message iteration
+- **Message counting**: Added counter to track number of messages received from agent query
+- **Error handling**: Added try-catch block to capture and display any silent failures
+- **Execution flow**: Added detailed logging to identify where execution stops
+
+#### Debug Information
+- Logs task prompt and execution start
+- Tracks agent query creation and message iteration
+- Captures and displays any errors that occur during execution
+- Reports total message count when execution completes
+
+## 2025-10-19 (v2.0.53)
+
+### Bug Fix - Agent Mode Working Directory
+
+**Fixed**: Agent mode failing to execute tasks due to working directory reset
+
+#### Issue Resolved
+- **Working directory preservation**: Agent mode now preserves the original working directory when launched
+- **MCP server configuration**: Fixed `cwd: process.cwd()` being reset during execution
+- **Task execution**: Agent can now properly execute code in the directory it was launched from
+
+#### Key Improvements
+- **Directory preservation**: Added `originalCwd` constant to capture working directory before reset
+- **MCP configuration**: Updated MCP server to use preserved working directory
+- **Task reliability**: Agent mode now reliably executes tasks in the correct directory
+
+## 2025-10-19 (v2.0.52)
+
+### Bug Fix - Async Execution System Reliability
+
+**Fixed**: Multiple reliability issues with async execution system
+
+#### Issues Resolved
+- **Vexify server errors**: Removed problematic external dependency causing "getAllExtensions" errors
+- **Parameter destructuring failures**: Fixed execId extraction in execution worker message handlers
+- **Async execution persistence**: Enhanced completion tracking and data preservation
+- **Module type warnings**: Cleaned up test artifacts causing MODULE_TYPELESS_PACKAGE_JSON warnings
+
+#### Key Improvements
+- **Clean server startup**: Removed vexify dependency to eliminate external errors
+- **Enhanced async persistence**: Completed executions now remain accessible with completion status
+- **Better data tracking**: Added completionTime, completed, and error fields to async execution data
+- **Improved reliability**: Fixed parameter extraction from `const { execId } = msg` to `const execId = msg.execId`
+
+#### Technical Changes
+- Updated `.codemode.json` to remove vexify MCP server
+- Enhanced `execution-worker.js` with better async execution lifecycle management
+- Fixed message parameter destructuring across all async management handlers
+- Added completion status tracking for finished async executions
+- Cleaned up debug logging and improved error handling
+
+#### Test Results
+- ✅ Server starts cleanly without vexify errors
+- ✅ Async handover works seamlessly after 30 seconds
+- ✅ list_async_executions returns detailed execution information
+- ✅ Enhanced async execution data with completion status
+- ✅ No MODULE_TYPELESS_PACKAGE_JSON warnings
+
 ## 2025-10-19 (v2.0.51)
 
 ### Bug Fix - Async Execution System Structural Issues
