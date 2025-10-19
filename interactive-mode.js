@@ -62,15 +62,8 @@ class InteractiveMode {
       originalWrite.apply(this, arguments);
     };
 
-    this.rl.on('SIGINT', () => {
-      this.cleanup();
-      process.exit(0);
-    });
-
-    process.on('SIGINT', () => {
-      this.cleanup();
-      process.exit(0);
-    });
+    // SIGINT/SIGTERM handlers are in agent.js to avoid duplicate handlers
+    // agent.js will call interactiveMode.cleanup() before exit
 
     process.stdin.on('keypress', (str, key) => {
       if (key && key.name === 'escape') {
@@ -111,15 +104,15 @@ class InteractiveMode {
       this.clearInputArea();
       this.isInputVisible = false;
     }
-    if (this.rl) {
-      this.rl.pause();
-    }
+    // Keep readline active to detect Ctrl-C and accept stdin during processing
+    // Do NOT call rl.pause() - it blocks signal detection
   }
 
   resume() {
     this.isPaused = false;
+    // Keep readline active at all times
+    // Readline was never paused, so no need to resume
     if (this.rl) {
-      this.rl.resume();
       this.rl.setPrompt('');
       this.rl.prompt();
     }

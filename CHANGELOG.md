@@ -1,5 +1,32 @@
 # CodeMode Agent Changelog
 
+## 2025-10-19 (v2.0.42)
+
+### Critical Fix - Stdin and Signal Handling During Processing
+
+**Fixed**: Readline was being paused during agent execution, blocking both Ctrl-C and stdin
+
+#### Issue
+- `interactive-mode.js` was calling `rl.pause()` when agent started executing
+- When readline is paused, it stops reading stdin completely
+- This blocked Ctrl-C detection AND prevented user from typing commands during execution
+- The fix from v2.0.39 was accidentally reverted when escape key functionality was added
+
+#### Solution
+- Removed `rl.pause()` call from `pause()` method (line 115)
+- Removed `rl.resume()` call from `resume()` method (line 122)
+- Keep readline active at all times to detect signals and accept input
+- Removed duplicate SIGINT handlers from interactive-mode.js (agent.js handles them)
+
+#### Files Modified
+- interactive-mode.js: Removed rl.pause/resume, removed duplicate SIGINT handlers
+
+#### Testing
+- ✅ Ctrl-C works immediately during agent execution
+- ✅ User can type and queue commands while agent is processing
+- ✅ Signal handlers work without conflicts
+- ✅ Interactive mode cleanup happens properly on exit
+
 ## 2025-10-19 (v2.0.41)
 
 ### Critical Fixes - npx Working Directory & Signal Handling
