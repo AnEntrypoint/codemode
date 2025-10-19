@@ -546,7 +546,7 @@ async function runAgent() {
     // FIXED: Use proper agent prompt now that working directory is fixed
     await executeTask(agentPrompt);
 
-    if (!isNonInteractive) {
+    if (!isNonInteractive && !isAgentMode) {
       while (true) {
         await new Promise(resolve => setTimeout(resolve, 100));
 
