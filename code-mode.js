@@ -15,7 +15,7 @@ function loadConfig() {
   const noMcp = process.argv.includes('--nomcp');
   if (noMcp) {
     console.error('[Execute Server] --nomcp flag detected, MCP tools disabled');
-    return { mcpServers: {} };
+    return { config: { mcpServers: {} }, configDir: process.cwd() };
   }
 
   const paths = [
@@ -28,7 +28,10 @@ function loadConfig() {
     try {
       if (existsSync(configPath)) {
         console.error(`[Execute Server] Loading config from: ${configPath}`);
-        return JSON.parse(readFileSync(configPath, 'utf8'));
+        return {
+          config: JSON.parse(readFileSync(configPath, 'utf8')),
+          configDir: dirname(configPath)
+        };
       }
     } catch (error) {
       console.error(`[Execute Server] Failed to load config from ${configPath}:`, error.message);
@@ -36,7 +39,7 @@ function loadConfig() {
   }
 
   console.error('[Execute Server] No config found, using empty config');
-  return { mcpServers: {} };
+  return { config: { mcpServers: {} }, configDir: process.cwd() };
 }
 
 // Global MCP Server Manager with persistent connections
@@ -45,8 +48,9 @@ class MCPServerManager {
     this.servers = new Map();
   }
 
-  async initialize(config) {
+  async initialize(config, configDir) {
     console.error('[MCP Manager] Initializing persistent MCP servers...');
+    this.configDir = configDir;
 
     for (const [serverName, serverConfig] of Object.entries(config.mcpServers || {})) {
       if (serverName === 'codeMode') continue;
@@ -63,11 +67,23 @@ class MCPServerManager {
 
   async startServer(serverName, serverConfig) {
     console.error(`[MCP Manager] Starting ${serverName}...`);
-    console.error(`[MCP Manager]   Command: ${serverConfig.command} ${serverConfig.args.join(' ')}`);
+
+    // Resolve relative paths in args relative to config directory
+    const resolvedArgs = serverConfig.args.map(arg => {
+      // If arg looks like a relative path to a .js file and doesn't start with a flag
+      if (arg.endsWith('.js') && !arg.startsWith('-') && !arg.startsWith('/')) {
+        const resolved = join(this.configDir, arg);
+        console.error(`[MCP Manager]   Resolved ${arg} -> ${resolved}`);
+        return resolved;
+      }
+      return arg;
+    });
+
+    console.error(`[MCP Manager]   Command: ${serverConfig.command} ${resolvedArgs.join(' ')}`);
 
     let proc;
     try {
-      proc = spawn(serverConfig.command, serverConfig.args, {
+      proc = spawn(serverConfig.command, resolvedArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd: process.cwd()
       });
@@ -597,11 +613,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 
 async function main() {
-  const config = loadConfig();
+  const { config, configDir } = loadConfig();
 
   // Initialize persistent MCP servers with error handling
   try {
-    await mcpManager.initialize(config);
+    await mcpManager.initialize(config, configDir);
     console.error('[Execute Server] MCP servers initialized successfully');
   } catch (error) {
     console.error('[Execute Server] MCP server initialization failed, using fallback mode:', error.message);

@@ -117,8 +117,51 @@ process.on('message', (msg) => {
           }
         }
 
-        // Execute the code
-        const result = await eval(`(async () => { ${code} })()`);
+        // Execute the code with smart return value handling
+        // Strategy: Try multiple approaches to capture the result
+        let result;
+
+        // Strategy 1: Try as pure expression (fastest for simple cases)
+        try {
+          result = await eval(`(async () => { return (${code}); })()`);
+        } catch (expressionError) {
+          // Strategy 2: Try to intelligently wrap the code
+          // Check if code has multiple statements by looking for semicolons or newlines
+          const trimmedCode = code.trim();
+          const hasMultipleStatements = trimmedCode.includes(';') || trimmedCode.includes('\n');
+
+          if (hasMultipleStatements) {
+            // Strategy 2a: For multi-statement code, try to extract and return last expression
+            // Split by semicolons and newlines to find statements
+            const lines = trimmedCode.split(/[;\n]/).map(l => l.trim()).filter(l => l.length > 0);
+
+            if (lines.length > 0) {
+              const lastLine = lines[lines.length - 1];
+              const previousLines = lines.slice(0, -1).join(';\n');
+
+              // Check if last line looks like an expression (not a declaration/control flow)
+              const isDeclaration = /^(const|let|var|function|class|if|for|while|do|switch|try)\s/.test(lastLine);
+
+              if (!isDeclaration && previousLines) {
+                // Try executing all but last line, then return last line
+                try {
+                  result = await eval(`(async () => { ${previousLines}; return (${lastLine}); })()`);
+                } catch (splitError) {
+                  // If that fails, execute all as statements
+                  result = await eval(`(async () => { ${code} })()`);
+                }
+              } else {
+                // Last line is a declaration or no previous lines, execute as-is
+                result = await eval(`(async () => { ${code} })()`);
+              }
+            } else {
+              result = await eval(`(async () => { ${code} })()`);
+            }
+          } else {
+            // Strategy 2b: Single statement, execute as-is
+            result = await eval(`(async () => { ${code} })()`);
+          }
+        }
 
         // Save any new global variables back to persistent context
         // Only save variables that aren't system properties

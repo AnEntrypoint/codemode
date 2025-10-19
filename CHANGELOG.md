@@ -1,5 +1,43 @@
 # CodeMode Agent Changelog
 
+## 2025-10-19 (v2.0.43)
+
+### Critical Fix - Return Value Capture & Tool Path Resolution
+
+**Fixed**: Execute tool not capturing return values and MCP tool path resolution issues
+
+#### Issues Fixed
+
+1. **Return Value Capture**
+   - `execution-worker.js` wasn't capturing return values from code execution
+   - Code executed in async function but didn't return the last expression
+   - Multi-line statements without explicit return returned undefined
+   - Fixed with smart return value detection and wrapping
+
+2. **Path Resolution for MCP Tools**
+   - When loaded via npm package, `built-in-tools-mcp.js` path wasn't resolved correctly
+   - Relative paths in config weren't resolved relative to config directory
+   - Added configDir tracking and relative path resolution in `code-mode.js`
+
+#### Key Changes
+
+**execution-worker.js:**
+- Smart return value detection: try expression first, then statements
+- Multi-statement code parsing to extract and return last expression
+- Handles expressions, statements, and mixed code patterns correctly
+
+**code-mode.js:**
+- Modified `loadConfig()` to return both config and configDir
+- Updated `MCPServerManager.initialize()` to track config directory
+- Added relative path resolution for tool arguments
+
+#### Testing Results
+- ✅ All built-in tools (Read, Write, Edit, Glob, Grep, Bash) working correctly
+- ✅ Return values captured from expressions and statements
+- ✅ Path resolution works when loaded from npm package
+- ✅ Working directory consistency maintained
+- ✅ MCP server initialization with correct paths
+
 ## 2025-10-19 (v2.0.42)
 
 ### Critical Fix - Stdin and Signal Handling During Processing
