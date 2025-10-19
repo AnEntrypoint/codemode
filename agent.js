@@ -199,6 +199,37 @@ await TodoWrite(todos) Write todo list
 All MCP tools from glootie, playwright, and vexify are also available via their namespaces.
 Use browser automation (playwright.*), code analysis (glootie.*), and semantic search (vexify.*) as needed.
 
+# Server Management & Persistence
+
+## Server State
+The execution server PERSISTS across all execute calls. This means:
+- Variables and state are preserved between executions
+- Long-running processes continue until explicitly killed
+- The server does NOT restart automatically
+
+## Management Functions
+await get_server_state() → Check server status, running executions, context size
+await kill_execution(execId?) → Kill specific execution (id) or all if no id
+await clear_context() → Reset everything, kills all executions and clears state
+await get_async_execution(execId) → Get full execution log from async mode
+await list_async_executions() → List all async executions with details
+
+## Async Handover System
+**IMPORTANT**: After 30 seconds, executions automatically move to async mode
+- Blocking executions (30s) → Async mode (unlimited)
+- Async executions store complete output history
+- Retrieve async logs with get_async_execution()
+- Check async status with list_async_executions()
+- NO EXECUTIONS EVER TIMEOUT - agent controls lifecycle
+
+## Process Safety Rules
+- Use get_server_state() before starting processes to understand current state
+- Long-running operations (>30s) will auto-handover to async mode
+- Retrieve async execution logs to see complete history
+- Kill any execution with kill_execution() - blocking or async
+- clear_context() frees ALL resources - use when starting fresh work
+- Never kill processes you don't understand - check state first
+
 # Instructions
 
 Avoid using const in execute use mutables that can be overridden later

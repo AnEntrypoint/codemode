@@ -3,6 +3,45 @@
 ## Overview
 This document provides comprehensive analysis of all available tools in this Claude Code environment, including their input/output specifications, parameters, behaviors, and corner cases.
 
+## Async Execution Handover System - CORE REQUIREMENTS
+
+### Fundamental Principles (MUST ALWAYS WORK)
+
+1. **Automatic Async Handover**: After 30 seconds (configurable), executions automatically transition from blocking to async mode, moving current history to async log for retrieval.
+
+2. **No Timeouts**: NO executions should ever time out - agent manages execution lifecycle and decides when to start/kill processes.
+
+3. **Agent Control**: Agent can kill any execution via execute tool with special parameters.
+
+### Implementation Requirements
+
+- **Default async handover time**: 30 seconds
+- **Async execution log**: Store complete execution history and make retrievable
+- **Execute tool special params**: Support for management operations (kill, retrieve async logs)
+- **No execution timeouts**: Remove all timeout mechanisms - agent controls lifecycle
+- **Seamless transition**: Blocking → Async should be transparent with history preservation
+
+### Execute Tool Special Parameters
+
+```javascript
+// Kill execution
+await execute({
+  action: 'kill',
+  executionId: 'exec_123'  // Optional - kills all if not specified
+})
+
+// Retrieve async execution log
+await execute({
+  action: 'get_async_log',
+  executionId: 'exec_123'
+})
+
+// Get all async executions
+await execute({
+  action: 'list_async_executions'
+})
+```
+
 ## Table of Contents
 - [Built-in Claude Code Tools](#built-in-claude-code-tools)
 - [MCP (Model Context Protocol) Tools](#mcp-model-context-protocol-tools)

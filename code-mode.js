@@ -275,6 +275,54 @@ class ExecutionContextManager {
       } else if (msg.type === 'INIT_COMPLETE') {
         this.initialized = true;
         console.error('[Execution Context] Worker initialized');
+      } else if (msg.type === 'KILL_EXECUTION') {
+        // Forward kill execution request to worker
+        this.worker.send(msg);
+      } else if (msg.type === 'GET_SERVER_STATE') {
+        // Forward server state request to worker
+        this.worker.send(msg);
+      } else if (msg.type === 'EXECUTION_KILLED') {
+        // Worker reports execution killed - forward to pending handler
+        console.error('[Execution Context] Execution killed:', msg.execId);
+      } else if (msg.type === 'SERVER_STATE') {
+        // Worker reports server state - forward to pending handler
+        console.error('[Execution Context] Server state requested');
+      } else if (msg.type === 'ASYNC_HANDOVER') {
+        // Worker reports async handover - resolve pending execution with current progress
+        const { execId, executionInfo } = msg;
+        console.error('[Execution Context] Async handover for execution:', execId);
+
+        if (this.pendingExecutions.has(execId)) {
+          const { resolve } = this.pendingExecutions.get(execId);
+          this.pendingExecutions.delete(execId);
+
+          // Return current progress as successful result
+          resolve({
+            success: true,
+            output: `Execution moved to async mode after 30 seconds.\n\nCurrent progress:\n${executionInfo.currentOutput}\n\n[Execution ID: ${execId} - Use 'action: "get_async_log", executionId: "${execId}"' to view further progress]`,
+            isAsyncHandover: true,
+            executionId: execId,
+            executionInfo
+          });
+        }
+      } else if (msg.type === 'GET_ASYNC_EXECUTION') {
+        // Forward async execution request to worker
+        this.worker.send(msg);
+      } else if (msg.type === 'LIST_ASYNC_EXECUTIONS') {
+        // Forward async executions list request to worker
+        this.worker.send(msg);
+      } else if (msg.type === 'ASYNC_EXECUTION_DATA') {
+        // Worker reports async execution data
+        console.error('[Execution Context] Async execution data for:', msg.execId);
+      } else if (msg.type === 'ASYNC_EXECUTIONS_LIST') {
+        // Worker reports async executions list
+        console.error('[Execution Context] Async executions list provided');
+      } else if (msg.type === 'ASYNC_HISTORY_CLEARED') {
+        // Worker reports history cleared
+        console.error('[Execution Context] Async history cleared for execution:', msg.execId);
+      } else if (msg.type === 'ASYNC_PROGRESS_DATA') {
+        // Worker reports progress data
+        console.error('[Execution Context] Async progress data for execution:', msg.execId);
       }
     });
 
@@ -468,14 +516,9 @@ global.Grep = async (pattern, grepPath, options) => await builtInTools.Grep({ pa
     const execId = this.nextId++;
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingExecutions.delete(execId);
-        reject(new Error('Execution timeout'));
-      }, 120000);
-
+      // NO TIMEOUT - executions run until agent manages them
       this.pendingExecutions.set(execId, {
         resolve: (result) => {
-          clearTimeout(timeout);
           resolve(result);
         }
       });
@@ -555,14 +598,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             workingDirectory: {
               type: 'string',
-              description: 'Path to working directory for execution'
+              description: 'Path to working directory for execution (required when executing code)'
             },
             code: {
               type: 'string',
-              description: 'JavaScript code to execute. Context persists between calls.'
+              description: 'JavaScript code to execute. Context persists between calls. When provided, this will execute code regardless of other parameters.'
+            },
+            action: {
+              type: 'string',
+              description: 'Management action. Valid values: "kill", "get_async_log", "list_async_executions", "clear_history", "get_progress". Used only when no code is provided.'
+            },
+            executionId: {
+              type: 'string',
+              description: 'Execution ID for kill, get_async_log, clear_history, or get_progress actions'
+            },
+            clearHistory: {
+              type: 'boolean',
+              description: 'Clear output history for async execution (used with clear_history action)'
+            },
+            since: {
+              type: 'string',
+              description: 'Get progress output since this timestamp (ISO format, used with get_progress action)'
             }
-          },
-          required: ['workingDirectory', 'code']
+          }
         }
       }
     ]
@@ -574,29 +632,127 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   if (name === 'execute') {
     try {
-      const { code, workingDirectory } = args;
+      const { action, executionId, code, workingDirectory } = args;
 
-      if (!code || !workingDirectory) {
-        throw new Error('code and workingDirectory are required');
+      // Smart execution: If code is provided, always execute code (ignore action)
+      if (code) {
+        // Normal code execution - ignore any action parameter
+        const absWorkingDir = resolve(workingDirectory);
+        if (!existsSync(absWorkingDir)) {
+          throw new Error(`Working directory does not exist: ${absWorkingDir}`);
+        }
+
+        const result = await executionContext.execute(code, absWorkingDir);
+
+        if (result.success) {
+          return {
+            content: [{ type: 'text', text: result.output || 'Code executed successfully' }]
+          };
+        } else {
+          return {
+            content: [{ type: 'text', text: result.output || 'Unknown error' }],
+            isError: true
+          };
+        }
       }
 
-      const absWorkingDir = resolve(workingDirectory);
-      if (!existsSync(absWorkingDir)) {
-        throw new Error(`Working directory does not exist: ${absWorkingDir}`);
+      // Handle management actions (only when no code provided)
+      if (action) {
+        switch (action) {
+          case 'kill':
+            if (executionContext.worker) {
+              executionContext.worker.send({
+                type: 'KILL_EXECUTION',
+                execId: executionId || null
+              });
+              return {
+                content: [{ type: 'text', text: `Kill request sent for execution: ${executionId || 'all'}` }]
+              };
+            } else {
+              return {
+                content: [{ type: 'text', text: 'Execution context not initialized' }],
+                isError: true
+              };
+            }
+
+          case 'get_async_log':
+            if (executionContext.worker && executionId) {
+              executionContext.worker.send({
+                type: 'GET_ASYNC_EXECUTION',
+                execId
+              });
+              return {
+                content: [{ type: 'text', text: `Retrieving async execution log for: ${executionId}` }]
+              };
+            } else {
+              return {
+                content: [{ type: 'text', text: executionId ? 'Execution context not initialized' : 'executionId required for get_async_log' }],
+                isError: true
+              };
+            }
+
+          case 'list_async_executions':
+            if (executionContext.worker) {
+              executionContext.worker.send({
+                type: 'LIST_ASYNC_EXECUTIONS'
+              });
+              return {
+                content: [{ type: 'text', text: 'Retrieving list of async executions' }]
+              };
+            } else {
+              return {
+                content: [{ type: 'text', text: 'Execution context not initialized' }],
+                isError: true
+              };
+            }
+
+          case 'clear_history':
+            if (executionContext.worker && executionId) {
+              executionContext.worker.send({
+                type: 'CLEAR_ASYNC_HISTORY',
+                execId,
+                clearHistory: args.clearHistory !== false // default to true
+              });
+              return {
+                content: [{ type: 'text', text: `Clearing output history for async execution: ${executionId}` }]
+              };
+            } else {
+              return {
+                content: [{ type: 'text', text: executionId ? 'Execution context not initialized' : 'executionId required for clear_history' }],
+                isError: true
+              };
+            }
+
+          case 'get_progress':
+            if (executionContext.worker && executionId) {
+              executionContext.worker.send({
+                type: 'GET_ASYNC_PROGRESS',
+                execId,
+                since: args.since
+              });
+              return {
+                content: [{ type: 'text', text: `Retrieving progress for async execution: ${executionId}` }]
+              };
+            } else {
+              return {
+                content: [{ type: 'text', text: executionId ? 'Execution context not initialized' : 'executionId required for get_progress' }],
+                isError: true
+              };
+            }
+
+          default:
+            return {
+              content: [{ type: 'text', text: `Unknown action: ${action}` }],
+              isError: true
+            };
+        }
       }
 
-      const result = await executionContext.execute(code, absWorkingDir);
-
-      if (result.success) {
-        return {
-          content: [{ type: 'text', text: result.output || 'Code executed successfully' }]
-        };
-      } else {
-        return {
-          content: [{ type: 'text', text: result.output || 'Unknown error' }],
-          isError: true
-        };
-      }
+      // No code and no action provided - helpful error message
+      return {
+        content: [{ type: 'text', text: 'No code provided. Either provide code to execute, or use an action parameter for management tasks.' }],
+        isError: true
+      };
     } catch (error) {
       return {
         content: [{ type: 'text', text: `Error: ${error.message}` }],

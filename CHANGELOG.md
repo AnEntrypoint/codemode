@@ -1,5 +1,314 @@
 # CodeMode Agent Changelog
 
+## 2025-10-19 (v2.0.50)
+
+### Major Feature - Async Execution Handover System
+
+**Added**: Complete async execution handover system with 30-second seamless transitions
+
+#### Core Requirements Implemented
+- **30-second automatic handover**: Executions seamlessly transition to async mode after 30 seconds
+- **No execution timeouts**: Agent maintains full control over execution lifecycle
+- **Agent control**: Execute tool provides comprehensive management parameters for async executions
+
+#### Key Features
+- **Seamless handover**: Returns current execution progress when transitioning to async mode
+- **Memory management**: Automatically clears output history after handover to save memory
+- **Progress tracking**: New management actions for monitoring async executions
+- **Background execution**: Long-running tasks continue without blocking agent process
+
+#### New Execute Tool Actions
+- `get_async_log`: Retrieve full execution log for async execution
+- `list_async_executions`: List all running async executions
+- `get_progress`: Get progress output since specific timestamp
+- `clear_history`: Clear output history for memory management
+- `kill`: Terminate specific or all running executions
+
+#### Handover Behavior
+```javascript
+// After 30 seconds, execution returns:
+"Execution moved to async mode after 30 seconds.
+
+Current progress:
+[2025-10-19T17:31:57.112Z] Starting task...
+[2025-10-19T17:31:58.115Z] Progress: 1/35
+...
+
+[Execution ID: 0 - Use management actions to monitor further progress]"
+```
+
+#### Technical Implementation
+- Enhanced `execution-worker.js` with async execution tracking and handover logic
+- Updated `code-mode.js` with smart execution detection and management action handlers
+- Added proper message routing for async management operations
+- Implemented progress history with timestamp filtering
+
+#### Testing Results
+- ✅ 35-second executions complete without blocking
+- ✅ Seamless 30-second handover with progress reporting
+- ✅ Management actions work correctly for async executions
+- ✅ Memory management via history clearing
+- ✅ Cross-platform compatibility (tested in test-repo)
+
+## 2025-10-19 (v2.0.49)
+
+### Enhancement - Intuitive Execute Tool Design
+
+**Improved**: Execute tool now works intuitively without parameter confusion
+
+#### Problem Solved
+- Users previously encountered "Unknown action: execute" errors when passing action parameters
+- Parameter nuances required users to understand complex execution patterns
+- Management actions and code execution had conflicting parameter requirements
+
+#### Smart Execution Logic
+- **Auto-detection**: If `code` parameter is provided, always execute code regardless of other parameters
+- **Management mode**: Action parameters (`kill`, `get_async_log`, `list_async_executions`) only processed when no code provided
+- **Flexible parameters**: All parameters are optional and context-aware
+- **Helpful errors**: Clear guidance when neither code nor action is provided
+
+#### Key Benefits
+- **No more parameter confusion**: Users can't accidentally trigger the wrong execution mode
+- **Backwards compatible**: All existing code continues to work unchanged
+- **Intuitive behavior**: Code execution takes precedence when code is present
+- **Self-healing**: Automatically handles the previous "action: execute" bug scenario
+
+#### Examples
+```javascript
+// This now works (previously failed with "Unknown action: execute")
+await execute({
+  workingDirectory: "/path",
+  code: "console.log('Hello')",
+  action: "execute"  // Ignored when code is present
+});
+
+// Management actions work when no code provided
+await execute({
+  action: "list_async_executions"
+});
+```
+
+## 2025-10-19 (v2.0.48)
+
+### Bug Fix - Execute Tool Action Parameter Handling
+
+**Fixed**: Invalid action parameter causing "Unknown action" errors
+
+#### Issue
+- Users passing `action: "execute"` parameter when it should not be used
+- Execute tool rejected valid action parameter with "Unknown action" error
+- Confusion between normal execution mode and management actions
+- Poor error messages didn't guide users to correct usage
+
+#### Root Cause
+- Execute tool parameter handling didn't validate or guide users correctly
+- No distinction between code execution and management actions
+- Missing validation for `action: "execute"` which is invalid
+
+#### Fix
+- Added specific validation for `action: "execute"` parameter
+- Clear error message explaining proper usage
+- Enhanced parameter description in tool schema
+- Better error handling with actionable guidance
+
+#### Usage Guidance
+
+**Correct Usage - Normal Code Execution:**
+```javascript
+// NO action parameter for normal execution
+await execute({
+  workingDirectory: "/path/to/dir",
+  code: "console.log('Hello World');"
+})
+```
+
+**Correct Usage - Management Actions:**
+```javascript
+// Kill execution
+await execute({
+  action: "kill",
+  executionId: "exec_123"  // Optional
+})
+
+// Get async execution log
+await execute({
+  action: "get_async_log",
+  executionId: "exec_123"
+})
+
+// List async executions
+await execute({
+  action: "list_async_executions"
+})
+```
+
+#### Benefits
+✅ Clear error messages guide users to correct parameter usage
+✅ Proper validation prevents invalid action parameters
+✅ Enhanced documentation reduces confusion
+✅ Management actions work correctly
+✅ Normal code execution works as expected
+
+## 2025-10-19 (v2.0.47)
+
+### Critical Bug Fix - Tool Availability Regression
+
+**Fixed**: Syntax error in execution-worker.js prevented MCP server initialization
+
+#### Issue
+- Async handover system implementation introduced syntax error
+- Extra closing brace in message handler blocked worker initialization
+- MCP server failed to start, making all tools unavailable
+- Agent showed "No such tool available: execute" errors
+
+#### Root Cause
+- Line 245 had incorrect syntax: `} else if` instead of `else if`
+- Execution worker couldn't parse, causing server hang during initialization
+
+#### Fix
+- Corrected syntax in execution-worker.js message handler
+- Worker now initializes properly
+- MCP server startup restored to normal
+
+#### Verification
+- ✅ Execution worker syntax validated
+- ✅ MCP server starts correctly
+- ✅ Built-in tools load properly
+- ✅ Execute tool and async handover system functional
+
+## 2025-10-19 (v2.0.46)
+
+### Revolutionary Feature - Async Execution Handover System
+
+**Added**: Complete async execution management with automatic handover and no timeouts
+
+#### Core Requirements Implemented
+
+1. **Automatic Async Handover** (30 seconds default)
+   - Executions automatically transition from blocking to async mode after timeout
+   - Complete execution history preserved and retrievable
+   - Seamless transition with no data loss
+
+2. **No Execution Timeouts**
+   - All execution timeouts removed from system
+   - Agent has full control over execution lifecycle
+   - Long-running processes run indefinitely until managed
+
+3. **Agent Control Interface**
+   - Execute tool special parameters for management operations
+   - Kill any execution (blocking or async) via tool calls
+   - Retrieve complete async execution logs
+   - List all async executions with details
+
+#### New Management Interface
+
+**Execute Tool Special Parameters:**
+```javascript
+// Kill execution (specific or all)
+await execute({ action: 'kill', executionId: 'exec_123' })
+
+// Retrieve async execution log
+await execute({ action: 'get_async_log', executionId: 'exec_123' })
+
+// List all async executions
+await execute({ action: 'list_async_executions' })
+```
+
+**Worker Functions:**
+```javascript
+await get_async_execution(execId)  // Get full async log
+await list_async_executions()       // List all async executions
+```
+
+#### Technical Implementation
+
+**execution-worker.js Changes:**
+- Added `asyncExecutions` Map for post-handover tracking
+- `moveToAsyncMode()` function handles seamless transition
+- Complete output history storage in `outputHistory` arrays
+- Timeout detection triggers automatic async handover
+- New message handlers: `GET_ASYNC_EXECUTION`, `LIST_ASYNC_EXECUTIONS`
+
+**code-mode.js Changes:**
+- Removed all execution timeouts from `execute()` method
+- Added execute tool special parameter handling
+- Enhanced message routing for async management
+- Updated server state to include async executions
+
+**agent.js Changes:**
+- Comprehensive async handover documentation
+- Process safety rules for async management
+- Clear examples of async execution patterns
+
+#### Benefits
+
+✅ **Unlimited Execution Time**: No more arbitrary timeouts
+✅ **Agent Control**: Complete lifecycle management via tool calls
+✅ **History Preservation**: Complete async execution logs available
+✅ **Resource Management**: Explicit control over execution cleanup
+✅ **Safety Guardrails**: Clear documentation prevents mistakes
+✅ **Seamless Experience**: Automatic handover is transparent to user
+
+## 2025-10-19 (v2.0.45)
+
+### Critical Enhancement - Server State Awareness & Process Management
+
+**Added**: Server persistence awareness and execution lifecycle management
+
+#### Issues Addressed
+
+1. **Server Persistence Confusion**
+   - Agent was unaware that server persists across executions
+   - No way to check running processes or server state
+   - Context management was unclear and automatic
+   - Risk of agent killing its own process unintentionally
+
+2. **Process Safety**
+   - No ability to kill long-running processes safely
+   - Context resets were automatic and unclear
+   - Missing guardrails for process management
+
+#### New Features
+
+**Server State Management:**
+- `get_server_state()` → Check server status, running executions, context size
+- `kill_execution(execId?)` → Kill specific execution or all if no id provided
+- `clear_context()` → Explicit context reset that frees all resources
+
+**Execution Tracking:**
+- All executions are tracked with IDs, start time, and duration
+- Running processes can be monitored and killed safely
+- Server persistence clearly documented in agent prompt
+
+**Safety Guardrails:**
+- Clear documentation about server persistence model
+- Process safety rules in agent instructions
+- Explicit rather than automatic resource management
+
+#### Key Changes
+
+**execution-worker.js:**
+- Added `runningExecutions` Map to track active executions
+- New message handlers: `KILL_EXECUTION`, `GET_SERVER_STATE`
+- Enhanced `clear_context()` to kill all running executions first
+- Added management functions: `kill_execution()`, `get_server_state()`
+
+**code-mode.js:**
+- Updated message forwarding for new management types
+- Improved execution lifecycle tracking
+
+**agent.js:**
+- Added comprehensive server management documentation
+- Process safety rules and best practices
+- Clear explanation of persistence model
+
+#### Benefits
+- ✅ Agent understands server persistence clearly
+- ✅ Safe process management with explicit controls
+- ✅ Prevents accidental process termination
+- ✅ Better resource management and cleanup
+- ✅ Clear guardrails and documentation
+
 ## 2025-10-19 (v2.0.43)
 
 ### Critical Fix - Return Value Capture & Tool Path Resolution
