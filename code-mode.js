@@ -677,13 +677,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           case 'get_async_log':
             if (executionContext.worker && executionId) {
-              executionContext.worker.send({
-                type: 'GET_ASYNC_EXECUTION',
-                execId
+              // Wait for async execution data response
+              return new Promise((resolve) => {
+                const listener = (msg) => {
+                  if (msg.type === 'ASYNC_EXECUTION_DATA' && msg.execId === executionId) {
+                    executionContext.worker.removeListener('message', listener);
+
+                    if (msg.error) {
+                      resolve({
+                        content: [{ type: 'text', text: `Error: ${msg.error}` }],
+                        isError: true
+                      });
+                    } else {
+                      const output = msg.data.outputHistory.map(entry =>
+                        `[${new Date(entry.timestamp).toISOString()}] ${entry.message}`
+                      ).join('\n');
+
+                      resolve({
+                        content: [{ type: 'text', text: `Async Execution ${executionId}:\n\n${output}` }]
+                      });
+                    }
+                  }
+                };
+
+                executionContext.worker.on('message', listener);
+                executionContext.worker.send({
+                  type: 'GET_ASYNC_EXECUTION',
+                  execId
+                });
               });
-              return {
-                content: [{ type: 'text', text: `Retrieving async execution log for: ${executionId}` }]
-              };
             } else {
               return {
                 content: [{ type: 'text', text: executionId ? 'Execution context not initialized' : 'executionId required for get_async_log' }],
@@ -693,12 +715,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           case 'list_async_executions':
             if (executionContext.worker) {
-              executionContext.worker.send({
-                type: 'LIST_ASYNC_EXECUTIONS'
+              // Wait for async executions list response
+              return new Promise((resolve) => {
+                const listener = (msg) => {
+                  if (msg.type === 'ASYNC_EXECUTIONS_LIST') {
+                    executionContext.worker.removeListener('message', listener);
+
+                    if (msg.executions.length === 0) {
+                      resolve({
+                        content: [{ type: 'text', text: 'No async executions currently running' }]
+                      });
+                    } else {
+                      const list = msg.executions.map(exec =>
+                        `- Execution ${exec.id}: Started ${new Date(exec.startTime).toISOString()}, Duration: ${Math.round((Date.now() - exec.startTime) / 1000)}s, History entries: ${exec.outputHistoryLength}`
+                      ).join('\n');
+
+                      resolve({
+                        content: [{ type: 'text', text: `Async Executions (${msg.executions.length}):\n\n${list}` }]
+                      });
+                    }
+                  }
+                };
+
+                executionContext.worker.on('message', listener);
+                executionContext.worker.send({
+                  type: 'LIST_ASYNC_EXECUTIONS'
+                });
               });
-              return {
-                content: [{ type: 'text', text: 'Retrieving list of async executions' }]
-              };
             } else {
               return {
                 content: [{ type: 'text', text: 'Execution context not initialized' }],
@@ -725,14 +768,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           case 'get_progress':
             if (executionContext.worker && executionId) {
-              executionContext.worker.send({
-                type: 'GET_ASYNC_PROGRESS',
-                execId,
-                since: args.since
+              // Wait for async progress data response
+              return new Promise((resolve) => {
+                const listener = (msg) => {
+                  if (msg.type === 'ASYNC_PROGRESS_DATA' && msg.execId === executionId) {
+                    executionContext.worker.removeListener('message', listener);
+
+                    if (msg.error) {
+                      resolve({
+                        content: [{ type: 'text', text: `Error: ${msg.error}` }],
+                        isError: true
+                      });
+                    } else {
+                      resolve({
+                        content: [{ type: 'text', text: `Progress for Execution ${executionId} (${msg.totalEntries} entries):\n\n${msg.progress}` }]
+                      });
+                    }
+                  }
+                };
+
+                executionContext.worker.on('message', listener);
+                executionContext.worker.send({
+                  type: 'GET_ASYNC_PROGRESS',
+                  execId,
+                  since: args.since
+                });
               });
-              return {
-                content: [{ type: 'text', text: `Retrieving progress for async execution: ${executionId}` }]
-              };
             } else {
               return {
                 content: [{ type: 'text', text: executionId ? 'Execution context not initialized' : 'executionId required for get_progress' }],

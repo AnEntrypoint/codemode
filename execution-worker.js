@@ -527,76 +527,13 @@ process.on('message', (msg) => {
       }
     };
 
-    // Add execution management functions
-    global.kill_execution = async (execId) => {
-      if (execId) {
-        // Kill specific execution
-        process.send({ type: 'KILL_EXECUTION', execId });
-        return new Promise((resolve) => {
-          const listener = (msg) => {
-            if (msg.type === 'EXECUTION_KILLED' && msg.execId === execId) {
-              process.removeListener('message', listener);
-              resolve({ success: msg.success, error: msg.error });
-            }
-          };
-          process.on('message', listener);
-        });
-      } else {
-        // Kill all executions
-        return global.clear_context();
-      }
-    };
+    // Management functions moved to execute tool actions to keep execution environment clean
 
-    global.get_server_state = async () => {
-      process.send({ type: 'GET_SERVER_STATE' });
-      return new Promise((resolve) => {
-        const listener = (msg) => {
-          if (msg.type === 'SERVER_STATE') {
-            process.removeListener('message', listener);
-            resolve(msg.state);
-          }
-        };
-        process.on('message', listener);
-      });
-    };
-
-    // Add async execution management functions
-    global.get_async_execution = async (execId) => {
-      process.send({ type: 'GET_ASYNC_EXECUTION', execId });
-      return new Promise((resolve) => {
-        const listener = (msg) => {
-          if (msg.type === 'ASYNC_EXECUTION_DATA' && msg.execId === execId) {
-            process.removeListener('message', listener);
-            if (msg.error) {
-              resolve({ error: msg.error });
-            } else {
-              resolve(msg.data);
-            }
-          }
-        };
-        process.on('message', listener);
-      });
-    };
-
-    global.list_async_executions = async () => {
-      process.send({ type: 'LIST_ASYNC_EXECUTIONS' });
-      return new Promise((resolve) => {
-        const listener = (msg) => {
-          if (msg.type === 'ASYNC_EXECUTIONS_LIST') {
-            process.removeListener('message', listener);
-            resolve(msg.executions);
-          }
-        };
-        process.on('message', listener);
-      });
-    };
-
-    // Log reminder about async tools and server persistence
+    // Log reminder about clean execution environment
     originalConsoleLog('[Execution worker ready]');
     originalConsoleLog('[Example] const result = await Read("file.txt");');
     originalConsoleLog('[Server State] This server persists across all executions');
-    originalConsoleLog('[Management] Use get_server_state() to check server status');
-    originalConsoleLog('[Management] Use kill_execution(id) to kill running executions');
+    originalConsoleLog('[Management] Use execute tool actions for async execution management');
     originalConsoleLog('[Management] Use clear_context() to reset everything');
 
     process.send({ type: 'INIT_COMPLETE' });
