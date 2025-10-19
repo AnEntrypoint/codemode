@@ -77,7 +77,8 @@ const task = filteredArgs.length > 0 ? filteredArgs.join(' ') : 'Clean up this c
 const originalCwd = process.cwd();
 
 let interactiveMode = null;
-if (!isNonInteractive) {
+// In agent mode, we don't use interactive mode at all
+if (!isNonInteractive && !isAgentMode) {
   interactiveMode = new InteractiveMode();
   interactiveMode.init();
 }
@@ -359,10 +360,6 @@ async function runAgent() {
           console.log('🚨 CRITICAL: The for-await loop is not iterating at all!');
         }
       }, 10000);
-
-      console.log('🔄 About to enter for-await loop...');
-      console.log('🔍 DEBUG: agentQuery type:', typeof agentQuery);
-      console.log('🔍 DEBUG: agentQuery is async iterable:', Symbol.asyncIterator in agentQuery);
 
       try {
         for await (const message of agentQuery) {
