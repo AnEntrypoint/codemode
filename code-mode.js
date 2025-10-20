@@ -537,10 +537,10 @@ const resolvePath = (filePath) => {
   return workingDir.replace(/\\\\/g, '/') + '/' + normalized;
 };
 
-global.TodoWrite = async (todos) => await builtInTools.TodoWrite({ todos });
+global.TodoWrite = async (todos) => await global.builtInTools.TodoWrite({ todos });
 global.LS = async (lsPath, show_hidden, recursive, files_only) => {
   // Map files_only to as_array parameter (built-in tools uses as_array, not files_only)
-  const result = await builtInTools.LS({ path: resolvePath(lsPath), show_hidden, recursive, as_array: files_only });
+  const result = await global.builtInTools.LS({ path: resolvePath(lsPath), show_hidden, recursive, as_array: files_only });
   // If as_array was requested, the result will be a JSON string that needs parsing
   if (files_only && typeof result === 'string') {
     try {
@@ -556,12 +556,12 @@ global.LS = async (lsPath, show_hidden, recursive, files_only) => {
   }
   return result;
 };
-global.Read = async (file_path, offset, limit) => await builtInTools.Read({ file_path: resolvePath(file_path), offset, limit });
-global.Write = async (file_path, content) => await builtInTools.Write({ file_path: resolvePath(file_path), content });
-global.Edit = async (file_path, old_string, new_string, replace_all) => await builtInTools.Edit({ file_path: resolvePath(file_path), old_string, new_string, replace_all });
-global.Bash = async (command, description, timeout) => await builtInTools.Bash({ command, description, timeout });
-global.Glob = async (pattern, globPath) => await builtInTools.Glob({ pattern, path: resolvePath(globPath) });
-global.Grep = async (pattern, grepPath, options) => await builtInTools.Grep({ pattern, path: resolvePath(grepPath), ...options });
+global.Read = async (file_path, offset, limit) => await global.builtInTools.Read({ file_path: resolvePath(file_path), offset, limit });
+global.Write = async (file_path, content) => await global.builtInTools.Write({ file_path: resolvePath(file_path), content });
+global.Edit = async (file_path, old_string, new_string, replace_all) => await global.builtInTools.Edit({ file_path: resolvePath(file_path), old_string, new_string, replace_all });
+global.Bash = async (command, description, timeout) => await global.builtInTools.Bash({ command, description, timeout });
+global.Glob = async (pattern, globPath) => await global.builtInTools.Glob({ pattern, path: resolvePath(globPath) });
+global.Grep = async (pattern, grepPath, options) => await global.builtInTools.Grep({ pattern, path: resolvePath(grepPath), ...options });
 `;
 
     return { functions, toolDescriptions };
