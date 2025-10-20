@@ -7,7 +7,8 @@ import { execSync, spawn } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import chalk from 'chalk';
 import hljs from 'highlight.js';
-import InteractiveMode from './interactive-mode.js';
+import EnhancedInteractiveMode from './enhanced-interactive-mode.js';
+import AgentInterruptionSystem from './agent-interruption-system.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -76,10 +77,37 @@ const task = filteredArgs.length > 0 ? filteredArgs.join(' ') : 'Clean up this c
 // Preserve the original working directory before it gets reset during execution
 const originalCwd = process.cwd();
 
+// Initialize persistent execution monitoring system
+let interruptionSystem = null;
+async function initializeInterruptionSystem() {
+  try {
+    interruptionSystem = new AgentInterruptionSystem();
+    await interruptionSystem.initialize((interruption) => {
+      if (interruption) {
+        console.log('');
+        console.log(chalk.yellow.bold('🔔 PERSISTENT TASK NOTIFICATION:'));
+        console.log(chalk.cyan('   Title:'), interruption.title);
+        console.log(chalk.cyan('   Message:'), interruption.message);
+        console.log(chalk.cyan('   Execution ID:'), interruption.executionId);
+        console.log(chalk.cyan('   Duration:'), interruption.execution.duration + 's');
+        console.log('');
+        console.log(chalk.yellow('   Available actions:'));
+        interruption.actions.forEach(action => {
+          console.log(chalk.gray(`     - ${action.name}: ${action.description}`));
+        });
+        console.log('');
+      }
+    });
+    console.log(chalk.green('   ✓ Persistent execution monitoring initialized'));
+  } catch (error) {
+    console.log(chalk.yellow('   ⚠ Warning: Failed to initialize interruption system:', error.message));
+  }
+}
+
 let interactiveMode = null;
 // In agent mode, we don't use interactive mode at all
 if (!isNonInteractive && !isAgentMode) {
-  interactiveMode = new InteractiveMode();
+  interactiveMode = new EnhancedInteractiveMode();
   interactiveMode.init();
 }
 
@@ -131,26 +159,27 @@ additionalTools = `\n\n# Additional Tool Documentation\n\n${startMd}\n\n${wfgyHo
 
 console.log(chalk.cyan.bold('2️⃣  Loading MCP Servers'));
 
+const configPath = join(process.cwd(), '.codemode.json');
 let mcpConfig = { mcpServers: {} };
-const configPaths = [
-  join(process.cwd(), '.codemode.json'),
-  join(__dirname, '.codemode.json'),
-  join(process.env.HOME || process.env.USERPROFILE || '~', '.claude', '.codemode.json')
-];
 
-for (const configPath of configPaths) {
-  try {
-    if (existsSync(configPath)) {
-      mcpConfig = JSON.parse(readFileSync(configPath, 'utf8'));
-      console.log(chalk.gray(`   ├─ Config loaded from: ${configPath}`));
-      break;
-    }
-  } catch (error) {
-    console.log(chalk.yellow(`   ⚠ Failed to load ${configPath}`));
+try {
+  if (existsSync(configPath)) {
+    mcpConfig = JSON.parse(readFileSync(configPath, 'utf8'));
+    console.log(chalk.gray(`   ├─ Config loaded from: ${configPath}`));
+  } else {
+    console.error(chalk.red.bold(`BRUTAL ERROR: Config file not found at ${configPath} - NO FALLBACKS - Create .codemode.json in current working directory`));
+    throw new Error(`BRUTAL ERROR: Config file not found: ${configPath} - NO FALLBACK PATHS EXIST`);
   }
+} catch (error) {
+  console.error(chalk.red.bold(`BRUTAL ERROR: Failed to load config from ${configPath}:`, error.message));
+  console.error(chalk.red.bold(`BRUTAL ERROR: This is the ONLY config location - no fallback paths exist`));
+  throw new Error(`BRUTAL ERROR: Config loading failed - NO FALLBACKS: ${error.message}`);
 }
 
-const mcpServerNames = Object.keys(mcpConfig.mcpServers || {}).filter(name => name !== 'codeMode');
+if (!mcpConfig.mcpServers) {
+    throw new Error('BRUTAL ERROR: mcpConfig.mcpServers is undefined - NO FALLBACKS');
+  }
+  const mcpServerNames = Object.keys(mcpConfig.mcpServers).filter(name => name !== 'codeMode');
 if (mcpServerNames.length > 0) {
   mcpServerNames.forEach((serverName, index) => {
     const server = mcpConfig.mcpServers[serverName];
@@ -167,8 +196,14 @@ console.log('');
 console.log(chalk.cyan.bold('3️⃣  Initializing Agent'));
 console.log(chalk.gray('   ├─ Setting up execute tool with MCP integration...'));
 console.log(chalk.gray('   ├─ Enabling extended thinking mode...'));
+console.log(chalk.gray('   ├─ Initializing persistent execution monitoring...'));
 console.log(chalk.gray('   └─ Starting Claude agent...'));
 console.log('');
+
+// Initialize the interruption system
+await initializeInterruptionSystem();
+
+const interruptionInstructions = interruptionSystem ? interruptionSystem.generateAgentInstructions() : '';
 
 const agentPrompt = `You are an AI assistant with access to a single mcp__codeMode__execute tool that allows you to run JavaScript code in real time. You must use this environment to fulfill the task as changes to the current folder.
 
@@ -177,33 +212,33 @@ const agentPrompt = `You are an AI assistant with access to a single mcp__codeMo
 IMPORTANT: You only have access to the mcp__codeMode__execute tool. Use it to run JavaScript code that provides these functions:
 
 ## File Operations
-await Read(path, offset?, limit?) Read file content with optional offset and limit
-await Write(path, content) Write content to file
-await Edit(path, oldString, newString, replaceAll?) Edit file by replacing strings
-await Glob(pattern, path?) Find files matching glob pattern
+await Read(path, offset?, limit?) → string - Read file content with line numbers (returns string, not object)
+await Write(path, content) → null - Write content to file (returns null on success)
+await Edit(path, oldString, newString, replaceAll?) → null - Edit file by replacing strings (returns null on success)
+await Glob(pattern, path?) → string[] - Find files matching glob pattern (returns array of file paths)
 
 ## Search Operations
-await Grep(pattern, path?, options?) Search for pattern in files using ripgrep
-  Options: {glob, type, output_mode, '-i', '-n', '-A', '-B', '-C', multiline, head_limit}
+await Grep(pattern, path?, options?) → string - Search for pattern in files using ripgrep (returns formatted string)
+  Options: {glob, type, output_mode: 'content'|'files_with_matches'|'count', '-i', '-n', '-A', '-B', '-C', multiline, head_limit}
 
 ## System Operations
-await Bash(command, description?, timeout?) Execute shell command
-await LS(path?, show_hidden?, recursive?) List directory contents
+await Bash(command, description?, timeout?) → string - Execute shell command (returns stdout+stderr as string)
+await LS(path?, show_hidden?, recursive?) → string[] - List directory contents (returns array of strings)
 
 ## Web Operations
-await WebFetch(url, prompt) Fetch and analyze web content
-await WebSearch(query, allowed_domains?, blocked_domains?) Search the web
+await WebFetch(url, prompt) → string - Fetch and analyze web content (returns analysis as string)
+await WebSearch(query, allowed_domains?, blocked_domains?) → object - Search the web (returns search result object)
 
 ## Task Management
-await TodoWrite(todos) Write todo list
+await TodoWrite(todos) → null - Write todo list (returns null on success)
   Format: [{content, status, activeForm}] where status is 'pending'|'in_progress'|'completed'
 
 ## Server Management
-await get_server_state() → Check server status, running executions, context size
-await kill_execution(execId?) → Kill specific execution or all if no id
-await clear_context() → Reset everything, kills all executions and clears state
-await get_async_execution(execId) → Get full execution log from async mode
-await list_async_executions() → List all async executions with details
+await get_server_state() → object - Check server status, running executions, context size
+await kill_execution(execId?) → object - Kill specific execution or all if no id
+await clear_context() → null - Reset everything, kills all executions and clears state
+await get_async_execution(execId) → object - Get full execution log from async mode
+await list_async_executions() → object[] - List all async executions with details
 
 CRITICAL: Use mcp__codeMode__execute with a "code" parameter containing your JavaScript code.
 
@@ -267,6 +302,8 @@ ONLY log:
 
 Keep output minimal and data-focused. Use code logic to filter and extract only essential information.
 
+${interruptionInstructions}
+
 # Task
 ${task}
 
@@ -287,6 +324,7 @@ async function runAgent() {
 
     async function executeTask(taskPrompt) {
       if (interactiveMode) {
+        interactiveMode.agentStarted();
         interactiveMode.pause();
       }
 
@@ -371,6 +409,25 @@ async function runAgent() {
           clearTimeout(messageTimeout);
           hasReceivedMessage = true;
         }
+
+        // Check for user interrupts
+        if (interactiveMode && interactiveMode.checkForInterrupt()) {
+          console.log('');
+          console.log(chalk.yellow.bold('⚡ User interrupt detected!'));
+          console.log(chalk.cyan('📝 Processing user command...'));
+
+          // Get the interrupt command
+          const interruptCommand = interactiveMode.getNextCommand();
+          if (interruptCommand) {
+            // Create a follow-up task from the interrupt
+            const followUpPrompt = `${agentPrompt}\n\n# User Interrupt Command\n${interruptCommand}\n\nPlease acknowledge this interrupt and incorporate the user's request into your current work.`;
+
+            // Break the current loop and start a new execution with the interrupt
+            await executeTask(followUpPrompt);
+            return; // Exit current execution
+          }
+        }
+
         messageCount++;
         console.log(`📨 Received message ${messageCount}: ${message.type}`);
         if (message.type === 'text') {
@@ -536,6 +593,7 @@ async function runAgent() {
       console.log(`✅ Task execution completed. Total messages received: ${messageCount}`);
 
       if (interactiveMode) {
+        interactiveMode.agentFinished();
         interactiveMode.resume();
       }
       } catch (error) {
@@ -550,21 +608,41 @@ async function runAgent() {
     // FIXED: Use proper agent prompt now that working directory is fixed
     await executeTask(agentPrompt);
 
-    if (!isNonInteractive && !isAgentMode) {
-      while (true) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+    if (!isNonInteractive && !isAgentMode && interactiveMode) {
+      // Set up event listener for user commands
+      interactiveMode.on('userCommand', async (command) => {
+        console.log('');
+        console.log(chalk.blue.bold('━━━ New User Command ━━━'));
+        console.log(chalk.cyan.bold('📋 Task:'), chalk.white(command));
+        console.log('');
 
-        if (interactiveMode.hasCommands()) {
-          const nextCommand = interactiveMode.getNextCommand();
-          console.log('');
-          console.log(chalk.blue.bold('━━━ New Command ━━━'));
-          console.log(chalk.cyan.bold('📋 Task:'), chalk.white(nextCommand));
-          console.log('');
+        const followUpPrompt = `${agentPrompt}\n\n# Follow-up Task\n${command}`;
+        await executeTask(followUpPrompt);
+      });
 
-          const followUpPrompt = `${agentPrompt}\n\n# Follow-up Task\n${nextCommand}`;
-          await executeTask(followUpPrompt);
-        }
-      }
+      // Keep the process alive for interactive commands
+      console.log(chalk.green.bold('✅ Session ready for interactive commands...'));
+
+      // Wait for either user commands or process termination
+      return new Promise((resolve) => {
+        process.on('SIGINT', () => {
+          console.log('');
+          console.log(chalk.yellow.bold('⚠ Received SIGINT (Ctrl-C), shutting down...'));
+          if (interactiveMode) {
+            interactiveMode.cleanup();
+          }
+          resolve();
+        });
+
+        process.on('SIGTERM', () => {
+          console.log('');
+          console.log(chalk.yellow.bold('⚠ Received SIGTERM, shutting down...'));
+          if (interactiveMode) {
+            interactiveMode.cleanup();
+          }
+          resolve();
+        });
+      });
     } else {
       console.log('');
       console.log(chalk.green.bold('✓ Task completed successfully'));
@@ -599,6 +677,9 @@ process.on('SIGINT', () => {
   if (interactiveMode) {
     interactiveMode.cleanup();
   }
+  if (interruptionSystem) {
+    interruptionSystem.stop();
+  }
   process.exit(0);
 });
 
@@ -608,7 +689,18 @@ process.on('SIGTERM', () => {
   if (interactiveMode) {
     interactiveMode.cleanup();
   }
+  if (interruptionSystem) {
+    interruptionSystem.stop();
+  }
   process.exit(0);
 });
 
-runAgent();
+// Run the agent with async initialization
+(async () => {
+  try {
+    await runAgent();
+  } catch (error) {
+    console.error(chalk.red.bold('Fatal error in agent:'), error);
+    process.exit(1);
+  }
+})();

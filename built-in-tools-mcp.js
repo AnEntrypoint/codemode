@@ -382,7 +382,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'Read',
-        description: 'Read file content from the filesystem. Returns file contents with line numbers. Supports reading specific ranges with offset and limit parameters.',
+        description: 'Read file content from the filesystem. Returns a string with line numbers prefixed (format: "    1→content"). NOT an object - use the result directly as a string. Supports reading specific ranges with offset and limit parameters.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -395,7 +395,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'Write',
-        description: 'Write content to a file, creating it if it doesn\'t exist or overwriting if it does. Creates parent directories as needed.',
+        description: 'Write content to a file, creating it if it doesn\'t exist or overwriting if it does. Creates parent directories as needed. Returns null on success, throws error on failure.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -421,7 +421,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'Glob',
-        description: 'Find files matching a glob pattern. Returns sorted list of matching files.',
+        description: 'Find files matching a glob pattern. Returns an array of file path strings sorted by modification time. Use as array, not as string.',
         inputSchema: {
           type: 'object',
           properties: {
