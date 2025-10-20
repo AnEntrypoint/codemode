@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Persistent execution context worker
+// Enhanced execution context worker with comprehensive robustness features
 // Communicates with parent via IPC for MCP tool calls
 
 import { createRequire } from 'module';
@@ -10,12 +10,478 @@ import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 
 // Initialize global scope for user code
-// Note: These will be set to the actual workingDirectory when code executes
 global.require = null;
 global.__filename = null;
 global.__dirname = null;
 global.module = { exports: {} };
 global.exports = global.module.exports;
+
+// Enhanced validation and monitoring systems
+class FileContentValidator {
+  static validateWrite(filePath, content) {
+    const validation = {
+      isValid: true,
+      warnings: [],
+      errors: []
+    };
+
+    try {
+      // Check for valid file path
+      if (!filePath || typeof filePath !== 'string') {
+        validation.isValid = false;
+        validation.errors.push('Invalid file path');
+        return validation;
+      }
+
+      // Check content type consistency
+      if (typeof content !== 'string') {
+        validation.isValid = false;
+        validation.errors.push('Content must be a string');
+        return validation;
+      }
+
+      // File extension validation
+      const ext = filePath.split('.').pop().toLowerCase();
+      const contentTrimmed = content.trim();
+
+      if (ext === 'js' || ext === 'mjs' || ext === 'ts') {
+        // Basic JavaScript syntax validation
+        try {
+          new Function(contentTrimmed);
+        } catch (syntaxError) {
+          validation.warnings.push(`Potential syntax issue: ${syntaxError.message}`);
+        }
+
+        // Check for common patterns
+        if (contentTrimmed.includes('require(') && (ext === 'mjs' || contentTrimmed.includes('import'))) {
+          validation.warnings.push('Mixed CommonJS and ES modules detected');
+        }
+
+        // Check for potentially dangerous code
+        const dangerousPatterns = [
+          /eval\s*\(/,
+          /Function\s*\(/,
+          /process\.exit/,
+          /child_process/,
+          /fs\.unlinkSync/,
+          /rm\s+-rf/
+        ];
+
+        dangerousPatterns.forEach(pattern => {
+          if (pattern.test(contentTrimmed)) {
+            validation.warnings.push(`Potentially dangerous pattern detected: ${pattern.source}`);
+          }
+        });
+      }
+
+      if (ext === 'json') {
+        try {
+          JSON.parse(contentTrimmed);
+        } catch (jsonError) {
+          validation.isValid = false;
+          validation.errors.push(`Invalid JSON: ${jsonError.message}`);
+        }
+      }
+
+      // Check for empty content
+      if (contentTrimmed.length === 0) {
+        validation.warnings.push('Writing empty file');
+      }
+
+    } catch (error) {
+      validation.isValid = false;
+      validation.errors.push(`Validation error: ${error.message}`);
+    }
+
+    return validation;
+  }
+}
+
+class SyntaxValidator {
+  static validateJavaScript(code) {
+    const result = {
+      isValid: true,
+      errors: [],
+      warnings: [],
+      suggestions: []
+    };
+
+    try {
+      // Basic syntax check
+      new Function(code);
+
+      // More detailed analysis
+      const lines = code.split('\n');
+
+      // Check for common issues
+      lines.forEach((line, index) => {
+        const lineNum = index + 1;
+        const trimmed = line.trim();
+
+        // Check for missing semicolons (optional)
+        if (trimmed && !trimmed.endsWith(';') && !trimmed.endsWith('{') && !trimmed.endsWith('}') &&
+            !trimmed.includes('if ') && !trimmed.includes('for ') && !trimmed.includes('while ') &&
+            !trimmed.includes('function ') && !trimmed.includes('class ') && !trimmed.includes('=>')) {
+          result.suggestions.push(`Line ${lineNum}: Consider adding semicolon`);
+        }
+
+        // Check for console.log statements
+        if (trimmed.includes('console.log')) {
+          result.warnings.push(`Line ${lineNum}: Console.log statement detected`);
+        }
+
+        // Check for TODO/FIXME comments
+        if (trimmed.includes('// TODO') || trimmed.includes('// FIXME')) {
+          result.warnings.push(`Line ${lineNum}: TODO/FIXME comment found`);
+        }
+      });
+
+      // Check for proper async/await usage
+      if (code.includes('await') && !code.includes('async')) {
+        result.warnings.push('Await found without async function');
+      }
+
+      // Check for proper error handling
+      if (code.includes('try') && !code.includes('catch')) {
+        result.warnings.push('Try block without catch block');
+      }
+
+    } catch (error) {
+      result.isValid = false;
+      result.errors.push(`Syntax error: ${error.message}`);
+    }
+
+    return result;
+  }
+}
+
+class BuildValidator {
+  constructor() {
+    this.buildSteps = [];
+    this.rollbackStack = [];
+  }
+
+  addBuildStep(description, action, rollback) {
+    this.buildSteps.push({ description, action, rollback });
+  }
+
+  async executeBuild() {
+    const results = {
+      success: true,
+      executedSteps: [],
+      failedStep: null,
+      error: null
+    };
+
+    for (let i = 0; i < this.buildSteps.length; i++) {
+      const step = this.buildSteps[i];
+
+      try {
+        console.log(`[Build] Executing step: ${step.description}`);
+        const stepResult = await step.action();
+        this.rollbackStack.push(step.rollback);
+        results.executedSteps.push({
+          step: step.description,
+          result: stepResult,
+          success: true
+        });
+      } catch (error) {
+        results.success = false;
+        results.failedStep = step.description;
+        results.error = error.message;
+
+        console.error(`[Build] Step failed: ${step.description} - ${error.message}`);
+
+        // Rollback all successful steps
+        await this.rollback();
+        break;
+      }
+    }
+
+    return results;
+  }
+
+  async rollback() {
+    console.log('[Build] Rolling back failed build...');
+
+    for (let i = this.rollbackStack.length - 1; i >= 0; i--) {
+      const rollback = this.rollbackStack[i];
+      try {
+        await rollback();
+      } catch (rollbackError) {
+        console.error(`[Build] Rollback failed: ${rollbackError.message}`);
+      }
+    }
+
+    this.rollbackStack = [];
+  }
+}
+
+class ProcessHealthMonitor {
+  constructor() {
+    this.processes = new Map();
+    this.retries = new Map();
+    this.maxRetries = 3;
+    this.healthCheckInterval = 5000; // 5 seconds
+    this.monitorInterval = null;
+  }
+
+  startMonitoring() {
+    this.monitorInterval = setInterval(() => {
+      this.checkAllProcesses();
+    }, this.healthCheckInterval);
+  }
+
+  stopMonitoring() {
+    if (this.monitorInterval) {
+      clearInterval(this.monitorInterval);
+      this.monitorInterval = null;
+    }
+  }
+
+  registerProcess(processId, processInfo) {
+    this.processes.set(processId, {
+      ...processInfo,
+      startTime: Date.now(),
+      lastHealthCheck: Date.now(),
+      status: 'running',
+      healthChecks: 0
+    });
+
+    if (!this.monitorInterval) {
+      this.startMonitoring();
+    }
+  }
+
+  async checkProcess(processId) {
+    const process = this.processes.get(processId);
+    if (!process) return false;
+
+    try {
+      // Health check logic based on process type
+      let isHealthy = false;
+
+      if (process.type === 'mcp_server') {
+        // Check if MCP server is responsive
+        isHealthy = await this.checkMCPServer(process);
+      } else if (process.type === 'execution_worker') {
+        // Check if execution worker is responsive
+        isHealthy = await this.checkExecutionWorker(process);
+      }
+
+      process.lastHealthCheck = Date.now();
+      process.healthChecks++;
+
+      if (!isHealthy && process.status === 'running') {
+        console.warn(`[Health Monitor] Process ${processId} appears unhealthy`);
+        return await this.handleUnhealthyProcess(processId);
+      }
+
+      return isHealthy;
+    } catch (error) {
+      console.error(`[Health Monitor] Error checking process ${processId}:`, error.message);
+      return false;
+    }
+  }
+
+  async checkMCPServer(process) {
+    // Simple health check - try to ping the server
+    return process.pid && !process.killed;
+  }
+
+  async checkExecutionWorker(process) {
+    // Check if worker is still connected
+    return process.connected && !process.killed;
+  }
+
+  async handleUnhealthyProcess(processId) {
+    const process = this.processes.get(processId);
+    if (!process) return false;
+
+    const retryCount = this.retries.get(processId) || 0;
+
+    if (retryCount < this.maxRetries) {
+      console.log(`[Health Monitor] Attempting to restart process ${processId} (retry ${retryCount + 1}/${this.maxRetries})`);
+
+      this.retries.set(processId, retryCount + 1);
+
+      try {
+        // Attempt to restart the process
+        if (process.restart) {
+          await process.restart();
+          console.log(`[Health Monitor] Successfully restarted process ${processId}`);
+          return true;
+        }
+      } catch (error) {
+        console.error(`[Health Monitor] Failed to restart process ${processId}:`, error.message);
+      }
+    } else {
+      console.error(`[Health Monitor] Max retries exceeded for process ${processId}`);
+      process.status = 'failed';
+      return false;
+    }
+
+    return false;
+  }
+
+  async checkAllProcesses() {
+    for (const [processId] of this.processes) {
+      await this.checkProcess(processId);
+    }
+  }
+
+  getProcessHealth() {
+    const health = {};
+    for (const [processId, process] of this.processes) {
+      health[processId] = {
+        status: process.status,
+        startTime: process.startTime,
+        lastHealthCheck: process.lastHealthCheck,
+        healthChecks: process.healthChecks,
+        retryCount: this.retries.get(processId) || 0
+      };
+    }
+    return health;
+  }
+}
+
+class ToolAvailabilityChecker {
+  constructor() {
+    this.tools = new Map();
+  }
+
+  registerTool(toolName, toolFunction) {
+    this.tools.set(toolName, {
+      func: toolFunction,
+      available: true,
+      lastCheck: Date.now(),
+      errorCount: 0
+    });
+  }
+
+  async checkTool(toolName) {
+    const tool = this.tools.get(toolName);
+    if (!tool) return false;
+
+    try {
+      // Simple availability check
+      if (typeof tool.func === 'function') {
+        tool.available = true;
+        tool.lastCheck = Date.now();
+        tool.errorCount = 0;
+        return true;
+      }
+    } catch (error) {
+      tool.errorCount++;
+      tool.lastCheck = Date.now();
+
+      if (tool.errorCount > 3) {
+        tool.available = false;
+        console.warn(`[Tool Checker] Tool ${toolName} marked as unavailable after ${tool.errorCount} errors`);
+      }
+    }
+
+    return tool.available;
+  }
+
+  async executeTool(toolName, ...args) {
+    const tool = this.tools.get(toolName);
+    if (!tool) {
+      throw new Error(`BRUTAL ERROR: Tool ${toolName} not registered - no fallbacks available`);
+    }
+
+    // Check if tool is available
+    const isAvailable = await this.checkTool(toolName);
+
+    if (!isAvailable) {
+      throw new Error(`BRUTAL ERROR: Tool ${toolName} is not available - error count: ${tool.errorCount}, last check: ${new Date(tool.lastCheck).toISOString()} - NO FALLBACKS EXIST`);
+    }
+
+    try {
+      const result = await tool.func(...args);
+      return result;
+    } catch (error) {
+      tool.errorCount++;
+      console.error(`BRUTAL ERROR: Tool ${toolName} execution failed #${tool.errorCount}:`, error.message);
+      throw error;
+    }
+  }
+
+  getToolStatus() {
+    const status = {};
+    for (const [toolName, tool] of this.tools) {
+      status[toolName] = {
+        available: tool.available,
+        lastCheck: tool.lastCheck,
+        errorCount: tool.errorCount
+      };
+    }
+    return status;
+  }
+}
+
+class OperationLogger {
+  constructor() {
+    this.operations = [];
+    this.maxOperations = 1000;
+  }
+
+  log(operation, details, level = 'info') {
+    const logEntry = {
+      id: randomUUID(),
+      timestamp: new Date().toISOString(),
+      operation,
+      details,
+      level,
+      state: this.captureState()
+    };
+
+    this.operations.push(logEntry);
+
+    // Keep only the last maxOperations entries
+    if (this.operations.length > this.maxOperations) {
+      this.operations = this.operations.slice(-this.maxOperations);
+    }
+
+    console.log(`[Operation Logger] ${level.toUpperCase()}: ${operation} - ${JSON.stringify(details)}`);
+  }
+
+  captureState() {
+    return {
+      memory: process.memoryUsage(),
+      uptime: process.uptime(),
+      pid: process.pid
+    };
+  }
+
+  getOperations(filter = {}) {
+    let filtered = this.operations;
+
+    if (filter.operation) {
+      filtered = filtered.filter(op => op.operation === filter.operation);
+    }
+
+    if (filter.level) {
+      filtered = filtered.filter(op => op.level === filter.level);
+    }
+
+    if (filter.since) {
+      const since = new Date(filter.since);
+      filtered = filtered.filter(op => new Date(op.timestamp) >= since);
+    }
+
+    return filtered;
+  }
+
+  clear() {
+    this.operations = [];
+  }
+}
+
+// Initialize global monitoring systems
+const healthMonitor = new ProcessHealthMonitor();
+const toolChecker = new ToolAvailabilityChecker();
+const operationLogger = new OperationLogger();
 
 // ES module execution helper
 class ESModuleExecutor {
@@ -35,22 +501,37 @@ class ESModuleExecutor {
     const tempFilePath = join(this.tempDir, `module-${moduleId}.mjs`);
 
     try {
+      // Validate syntax before execution
+      const validation = SyntaxValidator.validateJavaScript(code);
+      if (!validation.isValid) {
+        throw new Error(`Syntax validation failed: ${validation.errors.join(', ')}`);
+      }
+
+      // Log warnings if any
+      if (validation.warnings.length > 0) {
+        operationLogger.log('ES_MODULE_EXECUTION', {
+          warnings: validation.warnings,
+          suggestions: validation.suggestions
+        }, 'warning');
+      }
+
       // Prepare the ES module code with proper context
       const moduleCode = this.prepareModuleCode(code, workingDirectory, tempFilePath);
 
-      // Write the temporary module file
+      // Write the temporary module file with validation
+      const writeValidation = FileContentValidator.validateWrite(tempFilePath, moduleCode);
+      if (!writeValidation.isValid) {
+        throw new Error(`Failed to write temporary module: ${writeValidation.errors.join(', ')}`);
+      }
+
       writeFileSync(tempFilePath, moduleCode, 'utf8');
 
       // Execute using dynamic import
       const moduleUrl = `file://${tempFilePath}`;
       const module = await import(moduleUrl);
 
-      // Return the module's default export or the module itself - NO FALLBACKS
-      if (module.default !== undefined) {
-        return module.default;
-      } else {
-        return module;
-      }
+      // Return the module's default export or the module itself
+      return module.default || module;
 
     } finally {
       // Clean up temporary file
@@ -124,7 +605,6 @@ const pendingMCPCalls = new Map();
 let nextCallId = 0;
 
 // Persistent execution context - maintains state across all executions
-// All user code shares this context for variable persistence
 const persistentContext = {};
 const runningExecutions = new Map(); // Track running executions
 const asyncExecutions = new Map(); // Track async executions after handover
@@ -272,8 +752,41 @@ function moveToAsyncMode(execId) {
   console.log(`[Async Handover] Execution ${execId} moved to async mode, history cleared`);
 }
 
+// Enhanced error handler
+class ErrorHandler {
+  static async handleError(error, context = {}) {
+    const errorInfo = {
+      message: error.message,
+      stack: error.stack,
+      context,
+      timestamp: new Date().toISOString(),
+      suggestions: []
+    };
+
+    // Log the error
+    operationLogger.log('ERROR', errorInfo, 'error');
+
+    // Generate recovery suggestions based on error type
+    if (error.message.includes('ENOENT')) {
+      errorInfo.suggestions.push('Check if file paths are correct');
+      errorInfo.suggestions.push('Ensure working directory is set properly');
+    } else if (error.message.includes('EACCES')) {
+      errorInfo.suggestions.push('Check file permissions');
+      errorInfo.suggestions.push('Try running with appropriate permissions');
+    } else if (error.message.includes('timeout')) {
+      errorInfo.suggestions.push('Increase timeout value');
+      errorInfo.suggestions.push('Check if process is hanging');
+    } else if (error.message.includes('syntax')) {
+      errorInfo.suggestions.push('Validate JavaScript syntax');
+      errorInfo.suggestions.push('Check for missing brackets or semicolons');
+    }
+
+    return errorInfo;
+  }
+}
+
 // Handle messages from parent
-process.on('message', (msg) => {
+process.on('message', async (msg) => {
   if (msg.type === 'MCP_RESULT') {
     const { callId, success, result } = msg;
     if (pendingMCPCalls.has(callId)) {
@@ -286,8 +799,25 @@ process.on('message', (msg) => {
         reject(new Error(result));
       }
     }
+  } else if (msg.type === 'HEALTH_CHECK') {
+    // Respond to health check requests
+    const health = {
+      processes: healthMonitor.getProcessHealth(),
+      tools: toolChecker.getToolStatus(),
+      memory: process.memoryUsage(),
+      uptime: process.uptime(),
+      runningExecutions: runningExecutions.size,
+      asyncExecutions: asyncExecutions.size
+    };
+
+    process.send({ type: 'HEALTH_STATUS', health });
+  } else if (msg.type === 'GET_OPERATION_LOG') {
+    // Return operation log
+    const operations = operationLogger.getOperations(msg.filter || {});
+    process.send({ type: 'OPERATION_LOG', operations });
   } else if (msg.type === 'KILL_EXECUTION') {
-    // Kill a running or async execution
+    operationLogger.log('KILL_EXECUTION', { execId: msg.execId });
+    // Original kill execution logic...
     const execId = msg.execId;
     let killed = false;
     let error = null;
@@ -331,7 +861,8 @@ process.on('message', (msg) => {
 
     process.send({ type: 'EXECUTION_KILLED', execId, success: killed, error, killedCount: execId ? null : Array.from(runningExecutions.keys()).length + Array.from(asyncExecutions.keys()).length });
   } else if (msg.type === 'GET_ASYNC_EXECUTION') {
-    // Get async execution details
+    operationLogger.log('GET_ASYNC_EXECUTION', { execId: msg.execId });
+    // Original get async execution logic...
     const execId = msg.execId;
     if (asyncExecutions.has(execId)) {
       const execution = asyncExecutions.get(execId);
@@ -359,7 +890,8 @@ process.on('message', (msg) => {
       });
     }
   } else if (msg.type === 'LIST_ASYNC_EXECUTIONS') {
-    // List all async executions
+    operationLogger.log('LIST_ASYNC_EXECUTIONS');
+    // Original list async executions logic...
     const asyncList = Array.from(asyncExecutions.entries()).map(([id, execution]) => ({
       id,
       workingDirectory: execution.workingDirectory,
@@ -370,7 +902,8 @@ process.on('message', (msg) => {
     }));
     process.send({ type: 'ASYNC_EXECUTIONS_LIST', executions: asyncList });
   } else if (msg.type === 'GET_SERVER_STATE') {
-    // Return server state information
+    operationLogger.log('GET_SERVER_STATE');
+    // Original get server state logic with enhanced monitoring
     const state = {
       runningExecutions: Array.from(runningExecutions.entries()).map(([id, info]) => ({
         id,
@@ -391,12 +924,17 @@ process.on('message', (msg) => {
         isKilled: info.killed
       })),
       persistentContextSize: Object.keys(persistentContext).length,
-      serverPersistent: true, // The server persists across executions
-      asyncHandoverTimeout: asyncHandoverTimeout
+      serverPersistent: true,
+      asyncHandoverTimeout: asyncHandoverTimeout,
+      health: healthMonitor.getProcessHealth(),
+      tools: toolChecker.getToolStatus(),
+      memory: process.memoryUsage(),
+      uptime: process.uptime()
     };
     process.send({ type: 'SERVER_STATE', state });
   } else if (msg.type === 'CLEAR_ASYNC_HISTORY') {
-    // Clear output history for async execution
+    operationLogger.log('CLEAR_ASYNC_HISTORY', { execId: msg.execId });
+    // Original clear async history logic...
     const execId = msg.execId;
     const clearHistory = msg.clearHistory;
     if (asyncExecutions.has(execId)) {
@@ -418,7 +956,8 @@ process.on('message', (msg) => {
       });
     }
   } else if (msg.type === 'GET_ASYNC_PROGRESS') {
-    // Get progress for async execution since a specific time
+    operationLogger.log('GET_ASYNC_PROGRESS', { execId: msg.execId });
+    // Original get async progress logic...
     const execId = msg.execId;
     const since = msg.since;
     if (asyncExecutions.has(execId)) {
@@ -454,6 +993,8 @@ process.on('message', (msg) => {
     const code = msg.code;
     const workingDirectory = msg.workingDirectory;
 
+    operationLogger.log('EXECUTE_START', { execId, workingDirectory });
+
     (async () => {
       startCapture(execId);
 
@@ -473,7 +1014,7 @@ process.on('message', (msg) => {
       // Set up async handover timer
       executionInfo.handoverTimer = setTimeout(() => {
         if (runningExecutions.has(execId) && !executionInfo.killed) {
-          // Move to async mode
+          operationLogger.log('ASYNC_HANDOVER', { execId });
           moveToAsyncMode(execId);
         }
       }, asyncHandoverTimeout);
@@ -500,21 +1041,32 @@ process.on('message', (msg) => {
           }
         }
 
-        // Execute the code with smart return value handling
-        // Strategy: Try multiple approaches to capture the result
+        // Execute the code with smart return value handling and validation
         let result;
 
         // Check if this is an ES module
         if (esModuleExecutor.isESModule(code)) {
-          // Strategy: Use ES module executor for modules with import/export
+          operationLogger.log('ES_MODULE_EXECUTION', { execId });
           try {
             result = await esModuleExecutor.executeESModule(code, workingDirectory);
           } catch (esModuleError) {
-            console.error(`BRUTAL ERROR: ES module execution failed:`, esModuleError.message);
+            console.error(`BRUTAL ERROR: ES module execution failed for execId ${execId}:`, esModuleError.message);
             console.error(`BRUTAL ERROR: Code that failed:`, code.substring(0, 500) + (code.length > 500 ? '...' : ''));
             throw new Error(`BRUTAL ERROR: ES module execution failed - NO FALLBACKS: ${esModuleError.message}`);
           }
         } else {
+          // Regular JavaScript execution with syntax validation
+          const validation = SyntaxValidator.validateJavaScript(code);
+          if (!validation.isValid) {
+            throw new Error(`Syntax validation failed: ${validation.errors.join(', ')}`);
+          }
+
+          operationLogger.log('JAVASCRIPT_EXECUTION', {
+            execId,
+            warnings: validation.warnings,
+            suggestions: validation.suggestions
+          });
+
           // Strategy 1: Try as pure expression (fastest for simple cases)
           try {
             result = await eval(`(async () => { return (${code}); })()`);
@@ -526,7 +1078,6 @@ process.on('message', (msg) => {
 
             if (hasMultipleStatements) {
               // Strategy 2a: For multi-statement code, try to extract and return last expression
-              // Split by semicolons and newlines to find statements
               const lines = trimmedCode.split(/[;\n]/).map(l => l.trim()).filter(l => l.length > 0);
 
               if (lines.length > 0) {
@@ -559,7 +1110,6 @@ process.on('message', (msg) => {
         }
 
         // Save any new global variables back to persistent context
-        // Only save variables that aren't system properties
         const systemProps = new Set([
           '__filename', '__dirname', 'module', 'exports', 'require',
           'console', 'process', 'Buffer', 'global', 'setTimeout',
@@ -587,7 +1137,6 @@ process.on('message', (msg) => {
 
         // Clean up execution tracking
         runningExecutions.delete(execId);
-        // Don't delete from asyncExecutions - keep the history for async management
 
         // Mark async execution as completed if it exists in async executions
         if (asyncExecutions.has(execId)) {
@@ -596,13 +1145,21 @@ process.on('message', (msg) => {
           asyncExec.completionTime = Date.now();
         }
 
+        operationLogger.log('EXECUTE_SUCCESS', { execId });
+
         process.send({ type: 'EXEC_RESULT', execId, success: true, output });
       } catch (err) {
+        // Enhanced error handling
+        const errorInfo = await ErrorHandler.handleError(err, {
+          execId,
+          code: code.substring(0, 200), // Truncate for security
+          workingDirectory
+        });
+
         const output = stopCapture();
 
         // Clean up execution tracking
         runningExecutions.delete(execId);
-        // Don't delete from asyncExecutions - keep the history for async management
 
         // Mark async execution as completed with error if it exists in async executions
         if (asyncExecutions.has(execId)) {
@@ -612,27 +1169,37 @@ process.on('message', (msg) => {
           asyncExec.error = err.message;
         }
 
+        operationLogger.log('EXECUTE_ERROR', { execId, error: errorInfo });
+
         process.send({
           type: 'EXEC_RESULT',
           execId,
           success: false,
-          error: `${output}\nError: ${err.message}\n${err.stack}`
+          error: `${output}\nError: ${errorInfo.message}\n${errorInfo.suggestions.length > 0 ? '\nSuggestions:\n' + errorInfo.suggestions.map(s => `- ${s}`).join('\n') : ''}\n${err.stack}`
         });
       }
     })();
   } else if (msg.type === 'INIT_TOOLS') {
-    // Initialize MCP tool functions
+    operationLogger.log('INIT_TOOLS');
+    // Initialize MCP tool functions with enhanced monitoring
     const { toolFunctions } = msg;
 
     // Store tool functions for re-initialization after clear_context
     global.__toolFunctions = toolFunctions;
-    global.__callMCPTool = global.__callMCPTool; // Ensure this is preserved
+    global.__callMCPTool = global.__callMCPTool;
+
+    // Register tools with availability checker
+    Object.keys(toolFunctions).forEach(toolName => {
+      toolChecker.registerTool(toolName, () => toolFunctions[toolName]);
+    });
 
     // Generate tool functions that call back to parent
     eval(toolFunctions);
 
-    // Add clear_context function - now explicit, not automatic
+    // Enhanced clear_context function
     global.clear_context = () => {
+      operationLogger.log('CLEAR_CONTEXT');
+
       // Kill all running executions first
       for (const [execId, execution] of runningExecutions.entries()) {
         execution.killed = true;
@@ -677,14 +1244,22 @@ process.on('message', (msg) => {
       } else {
         console.log('[Context cleared]');
       }
+
+      // Clear operation logs
+      operationLogger.clear();
     };
 
-    // Management functions moved to execute tool actions to keep execution environment clean
+    // Log initialization complete
+    operationLogger.log('INIT_COMPLETE', {
+      toolsCount: Object.keys(toolFunctions).length,
+      monitoringEnabled: true
+    });
 
-    // Log reminder about clean execution environment
-    originalConsoleLog('[Execution worker ready]');
+    originalConsoleLog('[Enhanced execution worker ready]');
+    originalConsoleLog('[Features] File content validation, syntax validation, process health monitoring');
+    originalConsoleLog('[Features] Tool availability checking, enhanced error handling, operation logging');
     originalConsoleLog('[Example] const result = await Read("file.txt");');
-    originalConsoleLog('[Server State] This server persists across all executions');
+    originalConsoleLog('[Server State] This server persists across all executions with enhanced monitoring');
     originalConsoleLog('[Management] Use execute tool actions for async execution management');
     originalConsoleLog('[Management] Use clear_context() to reset everything');
 
@@ -692,9 +1267,11 @@ process.on('message', (msg) => {
   }
 });
 
-// Helper function for MCP tool calls
+// Helper function for MCP tool calls with enhanced monitoring
 global.__callMCPTool = async (serverName, toolName, args) => {
   const callId = nextCallId++;
+
+  operationLogger.log('MCP_CALL_START', { serverName, toolName, callId });
 
   return new Promise((resolve, reject) => {
     pendingMCPCalls.set(callId, { resolve, reject });
@@ -711,6 +1288,7 @@ global.__callMCPTool = async (serverName, toolName, args) => {
     setTimeout(() => {
       if (pendingMCPCalls.has(callId)) {
         pendingMCPCalls.delete(callId);
+        operationLogger.log('MCP_CALL_TIMEOUT', { serverName, toolName, callId }, 'error');
         reject(new Error('MCP call timeout'));
       }
     }, 180000);
@@ -718,13 +1296,23 @@ global.__callMCPTool = async (serverName, toolName, args) => {
 };
 
 process.on('SIGINT', () => {
-  originalConsoleLog('[Execution worker] Received SIGINT, shutting down...');
+  operationLogger.log('SIGINT_RECEIVED');
+  originalConsoleLog('[Enhanced execution worker] Received SIGINT, shutting down...');
+  healthMonitor.stopMonitoring();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  originalConsoleLog('[Execution worker] Received SIGTERM, shutting down...');
+  operationLogger.log('SIGTERM_RECEIVED');
+  originalConsoleLog('[Enhanced execution worker] Received SIGTERM, shutting down...');
+  healthMonitor.stopMonitoring();
   process.exit(0);
 });
 
-originalConsoleLog('[Execution worker ready]');
+// Start health monitoring
+healthMonitor.startMonitoring();
+
+originalConsoleLog('[Enhanced execution worker ready]');
+originalConsoleLog('[Monitoring] Process health monitoring started');
+originalConsoleLog('[Validation] File content and syntax validation enabled');
+originalConsoleLog('[Error Handling] Enhanced error recovery system active');

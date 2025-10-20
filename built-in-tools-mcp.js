@@ -6,6 +6,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { spawn } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'fs';
 import { join, resolve as resolvePath, dirname, basename } from 'path';
+import { randomUUID } from 'crypto';
 import fg from 'fast-glob';
 import { Readability } from '@mozilla/readability';
 import fetch from 'node-fetch';
@@ -605,6 +606,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ['path', 'transformations']
         }
+      },
+      {
+        name: 'execute',
+        description: 'Execute JavaScript code in a persistent server environment with access to file operations, search, and management functions',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            code: { type: 'string', description: 'JavaScript code to execute in the persistent server environment' }
+          },
+          required: ['code']
+        }
       }
     ]
   };
@@ -728,6 +740,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case 'ASTModify':
         result = await handleASTModify(args);
+        break;
+      case 'execute':
+        result = await handleExecute(args);
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);
@@ -1464,6 +1479,259 @@ async function handleASTModify(args) {
   } catch (error) {
     return `ASTModify error: ${error.message}`;
   }
+}
+
+// Store execution workers for persistent server functionality
+const executionWorkers = new Map();
+
+async function handleMCPWorkerCall(worker, msg) {
+  const { callId, tool, args } = msg;
+
+  try {
+    let result;
+
+    // Call the appropriate tool handler
+    switch (tool) {
+      case 'Read':
+        result = await handleRead(args);
+        break;
+      case 'Write':
+        result = await handleWrite(args);
+        break;
+      case 'Edit':
+        result = await handleEdit(args);
+        break;
+      case 'Glob':
+        result = await handleGlob(args);
+        break;
+      case 'Grep':
+        result = await handleGrep(args);
+        break;
+      case 'Bash':
+        result = await handleBash(args);
+        break;
+      case 'TodoWrite':
+        result = await handleTodoWrite(args);
+        break;
+      case 'WebFetch':
+        result = await handleWebFetch(args);
+        break;
+      case 'LS':
+        result = await handleLS(args);
+        break;
+      default:
+        throw new Error(`Unknown tool: ${tool}`);
+    }
+
+    // Send success result back to worker
+    worker.send({
+      type: 'MCP_RESULT',
+      callId,
+      success: true,
+      result
+    });
+
+  } catch (error) {
+    // Send error result back to worker
+    worker.send({
+      type: 'MCP_RESULT',
+      callId,
+      success: false,
+      result: error.message
+    });
+  }
+}
+
+async function handleExecute(args) {
+  const { code } = args;
+  const workingDirectory = process.cwd();
+  const execId = randomUUID();
+
+  return new Promise((resolve, reject) => {
+    // Check if we have a running execution worker for this directory
+    let worker = executionWorkers.get(workingDirectory);
+
+    if (!worker || worker.killed) {
+      // Start new execution worker
+      const workerPath = join(dirname(new URL(import.meta.url).pathname), 'execution-worker.js');
+      worker = spawn('node', [workerPath], {
+        stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+        cwd: workingDirectory,
+        env: { ...process.env }
+      });
+
+      worker.killed = false;
+      worker.pendingResults = new Map();
+
+      // Set up message handling
+      worker.on('message', (msg) => {
+        if (msg.type === 'EXEC_RESULT' && msg.execId === execId) {
+          if (msg.success) {
+            resolve(msg.result);
+          } else {
+            reject(new Error(msg.error));
+          }
+        } else if (msg.type === 'MCP_CALL') {
+          // Handle MCP tool calls from the execution worker
+          handleMCPWorkerCall(worker, msg);
+        }
+      });
+
+      worker.on('error', (error) => {
+        reject(new Error(`Execution worker error: ${error.message}`));
+      });
+
+      worker.on('exit', (code) => {
+        worker.killed = true;
+        executionWorkers.delete(workingDirectory);
+        if (code !== 0) {
+          reject(new Error(`Execution worker exited with code ${code}`));
+        }
+      });
+
+      executionWorkers.set(workingDirectory, worker);
+    }
+
+    // Set up timeout for this specific execution
+    const timeout = setTimeout(() => {
+      reject(new Error('Execution timeout (30s) - use async operations for long-running tasks'));
+    }, 30000);
+
+    // Set up one-time result handler for this execution
+    const resultHandler = (msg) => {
+      if (msg.type === 'EXEC_RESULT' && msg.execId === execId) {
+        clearTimeout(timeout);
+        worker.off('message', resultHandler);
+        if (msg.success) {
+          resolve(msg.result);
+        } else {
+          reject(new Error(msg.error));
+        }
+      }
+    };
+
+    worker.on('message', resultHandler);
+
+    // Initialize the worker with MCP tool functions if needed
+    const toolFunctions = `
+      global.Read = async (path, offset, limit) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "MCP_CALL", callId, tool: "Read", args: { path, offset, limit } });
+        });
+      };
+
+      global.Write = async (path, content) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "MCP_CALL", callId, tool: "Write", args: { path, content } });
+        });
+      };
+
+      global.Edit = async (path, oldString, newString, replaceAll) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "MCP_CALL", callId, tool: "Edit", args: { path, old_string: oldString, new_string: newString, replace_all: replaceAll } });
+        });
+      };
+
+      global.Glob = async (pattern, path) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "MCP_CALL", callId, tool: "Glob", args: { pattern, path } });
+        });
+      };
+
+      global.Grep = async (pattern, path, options) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "MCP_CALL", callId, tool: "Grep", args: { pattern, path, options } });
+        });
+      };
+
+      global.Bash = async (command, description, timeout) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "MCP_CALL", callId, tool: "Bash", args: { command, description, timeout } });
+        });
+      };
+
+      global.TodoWrite = async (todos) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "MCP_CALL", callId, tool: "TodoWrite", args: { todos } });
+        });
+      };
+
+      global.WebFetch = async (url) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "MCP_CALL", callId, tool: "WebFetch", args: { url } });
+        });
+      };
+
+      global.get_server_state = async () => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "GET_SERVER_STATE", callId });
+        });
+      };
+
+      global.kill_execution = async (execId) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "KILL_EXECUTION", callId, execId });
+        });
+      };
+
+      global.clear_context = async () => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "CLEAR_CONTEXT", callId });
+        });
+      };
+
+      global.get_async_execution = async (execId) => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "GET_ASYNC_EXECUTION", callId, execId });
+        });
+      };
+
+      global.list_async_executions = async () => {
+        const callId = "${randomUUID()}";
+        return new Promise((resolve, reject) => {
+          worker.pendingResults.set(callId, { resolve, reject });
+          worker.send({ type: "LIST_ASYNC_EXECUTIONS", callId });
+        });
+      };
+    `;
+
+    // Initialize tools and send execute command
+    worker.send({ type: 'INIT_TOOLS', toolFunctions });
+
+    // Wait a bit for initialization
+    setTimeout(() => {
+      worker.send({
+        type: 'EXECUTE',
+        execId,
+        code,
+        workingDirectory
+      });
+    }, 100);
+  });
 }
 
 async function main() {

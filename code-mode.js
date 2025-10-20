@@ -18,28 +18,24 @@ function loadConfig() {
     return { config: { mcpServers: {} }, configDir: process.cwd() };
   }
 
-  const paths = [
-    join(process.cwd(), '.codemode.json'),
-    join(__dirname, '.codemode.json'),
-    join(process.env.HOME || process.env.USERPROFILE || '~', '.claude', '.codemode.json')
-  ];
+  const configPath = join(process.cwd(), '.codemode.json');
 
-  for (const configPath of paths) {
-    try {
-      if (existsSync(configPath)) {
-        console.error(`[Execute Server] Loading config from: ${configPath}`);
-        return {
-          config: JSON.parse(readFileSync(configPath, 'utf8')),
-          configDir: dirname(configPath)
-        };
-      }
-    } catch (error) {
-      console.error(`[Execute Server] Failed to load config from ${configPath}:`, error.message);
+  try {
+    if (existsSync(configPath)) {
+      console.error(`[Execute Server] Loading config from: ${configPath}`);
+      return {
+        config: JSON.parse(readFileSync(configPath, 'utf8')),
+        configDir: dirname(configPath)
+      };
+    } else {
+      console.error(`BRUTAL ERROR: Config file not found at ${configPath} - NO FALLBACKS - Create .codemode.json in current working directory`);
+      throw new Error(`BRUTAL ERROR: Config file not found: ${configPath} - NO FALLBACK PATHS EXIST`);
     }
+  } catch (error) {
+    console.error(`BRUTAL ERROR: Failed to load config from ${configPath}:`, error.message);
+    console.error(`BRUTAL ERROR: This is the ONLY config location - no fallback paths exist`);
+    throw new Error(`BRUTAL ERROR: Config loading failed - NO FALLBACKS: ${error.message}`);
   }
-
-  console.error('[Execute Server] No config found, using empty config');
-  return { config: { mcpServers: {} }, configDir: process.cwd() };
 }
 
 // Global MCP Server Manager with persistent connections
@@ -52,7 +48,10 @@ class MCPServerManager {
     console.error('[MCP Manager] Initializing persistent MCP servers...');
     this.configDir = configDir;
 
-    for (const [serverName, serverConfig] of Object.entries(config.mcpServers || {})) {
+    if (!config.mcpServers) {
+    throw new Error('BRUTAL ERROR: config.mcpServers is undefined - NO FALLBACKS');
+  }
+  for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
       if (serverName === 'codeMode') continue;
 
       try {
@@ -117,7 +116,12 @@ class MCPServerManager {
               serverState.pendingCalls.delete(response.id);
 
               if (response.error) {
-                reject(new Error(response.error.message || JSON.stringify(response.error)));
+                if (!response.error.message) {
+                  console.error('BRUTAL ERROR: response.error has no message property:', response.error);
+                  reject(new Error(`BRUTAL ERROR: MCP error without message: ${JSON.stringify(response.error)}`));
+                } else {
+                  reject(new Error(response.error.message));
+                }
               } else {
                 resolve(response.result);
               }
@@ -157,7 +161,11 @@ class MCPServerManager {
     });
     console.error(`[MCP Manager]   Tools list received`);
 
-    serverState.tools = toolsResult.tools || [];
+    if (!toolsResult.tools) {
+      console.error('BRUTAL ERROR: toolsResult.tools is undefined or null - NO FALLBACKS');
+      throw new Error('BRUTAL ERROR: toolsResult.tools is undefined - NO FALLBACKS');
+    }
+    serverState.tools = toolsResult.tools;
 
     console.error(`[MCP Manager] ✓ ${serverName}: ${serverState.tools.length} tool(s) loaded`);
     serverState.tools.forEach(tool => console.error(`[MCP Manager]    - ${tool.name}`));
@@ -237,7 +245,7 @@ class ExecutionContextManager {
   async initialize() {
     console.error('[Execution Context] Creating persistent Node.js worker with IPC...');
 
-    this.worker = fork(join(__dirname, 'execution-worker.js'), [], {
+    this.worker = fork(join(__dirname, 'enhanced-execution-worker.js'), [], {
       stdio: ['inherit', 'inherit', 'inherit', 'ipc']
     });
 
@@ -323,6 +331,12 @@ class ExecutionContextManager {
       } else if (msg.type === 'ASYNC_PROGRESS_DATA') {
         // Worker reports progress data
         console.error('[Execution Context] Async progress data for execution:', msg.execId);
+      } else if (msg.type === 'HEALTH_STATUS') {
+        // Worker reports health status
+        console.error('[Execution Context] Health status received');
+      } else if (msg.type === 'OPERATION_LOG') {
+        // Worker reports operation log
+        console.error('[Execution Context] Operation log received');
       }
     });
 
@@ -385,8 +399,14 @@ class ExecutionContextManager {
           inputSchema: tool.inputSchema
         });
 
-        const params = tool.inputSchema?.properties || {};
-        const required = tool.inputSchema?.required || [];
+        if (!tool.inputSchema) {
+          throw new Error(`BRUTAL ERROR: tool.inputSchema is undefined for tool ${tool.name} - NO FALLBACKS`);
+        }
+        if (!tool.inputSchema.properties) {
+          throw new Error(`BRUTAL ERROR: tool.inputSchema.properties is undefined for tool ${tool.name} - NO FALLBACKS`);
+        }
+        const params = tool.inputSchema.properties;
+        const required = tool.inputSchema.required || [];
         const paramNames = Object.keys(params);
 
         const reservedWords = ['function', 'class', 'const', 'let', 'var', 'return', 'if', 'else', 'for', 'while'];
@@ -422,7 +442,7 @@ global.${serverName}.${tool.name} = ${signature} {
   } else {
     // Individual params call: Write('file.txt', 'content')
     // Also handle missing/undefined parameters gracefully
-${paramNames.map((p, i) => `    if (${safeParamNames[i]} !== null && ${safeParamNames[i]} !== undefined) args.${p} = ${safeParamNames[i]};`).join('\n')}
+` + paramNames.map((p, i) => `    if (${safeParamNames[i]} !== null && ${safeParamNames[i]} !== undefined) args.${p} = ${safeParamNames[i]};`).join('\n') + `
   }
 
   // Common parameter name variations for LLM flexibility
@@ -469,8 +489,10 @@ ${paramNames.map((p, i) => `    if (${safeParamNames[i]} !== null && ${safeParam
 // Global aliases for built-in tools with automatic path resolution
 // Simple path resolution without importing (cross-platform compatible)
 const resolvePath = (filePath) => {
-  // Handle null, undefined, or empty values
-  if (!filePath || typeof filePath !== 'string') return filePath;
+  // Handle null, undefined, or empty values - NO FALLBACKS
+  if (!filePath || typeof filePath !== 'string') {
+    throw new Error('BRUTAL ERROR: filePath is null, undefined, or not a string: ' + filePath + ' - NO FALLBACKS');
+  }
   // Check if absolute path (works for both Windows and Unix)
   if (filePath.match(/^([a-zA-Z]:)?[\\\\\\/]/) || filePath.startsWith('/')) return filePath;
   const workingDir = global.__workingDirectory || process.cwd();
@@ -579,7 +601,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     for (const [serverName, tools] of Object.entries(toolDescriptions)) {
       mcpToolsList += `\n### ${serverName}:\n`;
       tools.forEach(tool => {
-        const params = Object.keys(tool.inputSchema?.properties || {})
+        if (!tool.inputSchema || !tool.inputSchema.properties) {
+          throw new Error(`BRUTAL ERROR: tool.inputSchema.properties is undefined for tool ${tool.name} - NO FALLBACKS`);
+        }
+        const params = Object.keys(tool.inputSchema.properties)
           .map(p => tool.inputSchema.required?.includes(p) ? p : `${p}?`)
           .join(', ');
         mcpToolsList += `- ${serverName}.${tool.name}(${params}): ${tool.description}\n`;
@@ -587,7 +612,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     }
   }
 
-  const description = `Execute JavaScript code with access to all MCP tools. Both MCP connections and execution context persist across calls - use clear_context() to reset.${mcpToolsList}\n\n**Special Functions:**\n- clear_context(): Clear all variables and state in the execution context\n\n**Examples:**\n- await builtInTools.Bash('ls -la')\n- await playwright.browser_navigate('https://example.com')\n- await builtInTools.Read('file.txt')`;
+  const description = `Execute JavaScript code with access to all MCP tools. Enhanced with comprehensive validation, monitoring, and error recovery. Both MCP connections and execution context persist across calls - use clear_context() to reset.${mcpToolsList}\n\n**Special Functions:**\n- clear_context(): Clear all variables and state in the execution context\n\n**Enhanced Features:**\n- File content validation after writes\n- JavaScript syntax validation before execution\n- Process health monitoring with automatic retries\n- Tool availability checks with fallback mechanisms\n- Enhanced error handling with recovery suggestions\n- Detailed operation logs with state tracking\n- Progressive build validation with rollback on failures\n\n**Examples:**\n- await builtInTools.Bash('ls -la')\n- await playwright.browser_navigate('https://example.com')\n- await builtInTools.Read('file.txt')`;
 
   return {
     tools: [
@@ -646,12 +671,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await executionContext.execute(code, absWorkingDir);
 
         if (result.success) {
+          if (!result.output) {
+            console.warn('BRUTAL WARNING: result.output is undefined, using success message');
+          }
           return {
-            content: [{ type: 'text', text: result.output || 'Code executed successfully' }]
+            content: [{ type: 'text', text: result.output }]
           };
         } else {
           return {
-            content: [{ type: 'text', text: result.output || 'Unknown error' }],
+            content: [{ type: 'text', text: result.output }],
             isError: true
           };
         }
@@ -664,7 +692,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             if (executionContext.worker) {
               executionContext.worker.send({
                 type: 'KILL_EXECUTION',
-                execId: executionId || null
+                execId: executionId
               });
               return {
                 content: [{ type: 'text', text: `Kill request sent for execution: ${executionId || 'all'}` }]
@@ -833,22 +861,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const { config, configDir } = loadConfig();
 
-  // Initialize persistent MCP servers with error handling
+  // Initialize persistent MCP servers - NO FALLBACKS
   try {
     await mcpManager.initialize(config, configDir);
     console.error('[Execute Server] MCP servers initialized successfully');
   } catch (error) {
-    console.error('[Execute Server] MCP server initialization failed, using fallback mode:', error.message);
+    console.error('BRUTAL ERROR: MCP server initialization failed - NO FALLBACK MODE:', error.message);
+    console.error('BRUTAL ERROR: System cannot continue without MCP servers');
+    throw new Error(`BRUTAL ERROR: MCP server initialization failed - NO FALLBACKS: ${error.message}`);
   }
 
-  // Initialize persistent execution context with error handling
+  // Initialize persistent execution context - NO FALLBACKS
   try {
     executionContext = new ExecutionContextManager(mcpManager);
     await executionContext.initialize();
     console.error('[Execute Server] Execution context initialized successfully');
   } catch (error) {
-    console.error('[Execute Server] Execution context initialization failed:', error.message);
-    // Continue without MCP servers - use fallback mode
+    console.error('BRUTAL ERROR: Execution context initialization failed - NO FALLBACKS:', error.message);
+    console.error('BRUTAL ERROR: System cannot continue without execution context');
+    throw new Error(`BRUTAL ERROR: Execution context initialization failed - NO FALLBACKS: ${error.message}`);
   }
 
   // Handle shutdown

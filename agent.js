@@ -147,7 +147,7 @@ if (!isNonInteractive && !isAgentMode) {
 
 console.log('');
 console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-console.log(chalk.blue.bold('  CodeMode Agent Session Start'));
+console.log(chalk.blue.bold('  codemode Agent Session Start'));
 console.log(chalk.blue.bold('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
 console.log('');
 console.log(chalk.cyan.bold('📋 Task:'), chalk.white(task));
