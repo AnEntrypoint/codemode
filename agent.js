@@ -465,6 +465,7 @@ async function runAgent() {
         // Check for execution completion notifications and unreported logs
         if (interruptionSystem && interruptionSystem.hasPendingNotifications()) {
           const notifications = interruptionSystem.getPendingNotifications();
+          console.log(`[DEBUG] Found ${notifications.length} notifications, types:`, notifications.map(n => n.type));
           if (notifications.length > 0) {
             // Get the latest notification for each execution
             const latestNotifications = new Map();
