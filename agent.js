@@ -219,8 +219,10 @@ if (!mcpConfig.mcpServers) {
   }
 
 // Resolve relative script paths to absolute paths relative to package installation
-// This ensures MCP servers can find their scripts regardless of where the user runs the agent from
+// AND set environment variables for working directory
+// This ensures MCP servers can find their scripts AND operate on the correct working directory
 const packageDir = dirname(new URL(import.meta.url).pathname);
+const userWorkingDirectory = process.cwd();
 for (const [serverName, serverConfig] of Object.entries(mcpConfig.mcpServers)) {
   if (serverConfig.args && Array.isArray(serverConfig.args)) {
     serverConfig.args = serverConfig.args.map(arg => {
@@ -231,6 +233,12 @@ for (const [serverName, serverConfig] of Object.entries(mcpConfig.mcpServers)) {
       return arg;
     });
   }
+
+  // Set environment variable for working directory so MCP server knows where to operate
+  if (!serverConfig.env) {
+    serverConfig.env = {};
+  }
+  serverConfig.env.CODEMODE_WORKING_DIRECTORY = userWorkingDirectory;
 }
 
 const mcpServerNames = Object.keys(mcpConfig.mcpServers).filter(name => name !== 'codeMode');

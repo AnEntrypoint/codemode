@@ -22,8 +22,13 @@ import {
   ASTPatternValidator
 } from './ast-error-handling.js';
 
+// Get working directory from environment or use WORKING_DIRECTORY
+// This allows the MCP server to operate on the correct directory when spawned by Anthropic SDK
+const WORKING_DIRECTORY = process.env.CODEMODE_WORKING_DIRECTORY || WORKING_DIRECTORY;
+console.error('[built-in-tools-mcp] Working directory:', WORKING_DIRECTORY);
+
 class ASTModificationHelper {
-  constructor(workingDirectory = process.cwd()) {
+  constructor(workingDirectory = WORKING_DIRECTORY) {
     this.workingDirectory = workingDirectory;
   }
 
@@ -639,13 +644,13 @@ async function runAutoLint(args, operation) {
       return null;
     }
 
-    const targetPath = resolvePath(process.cwd(), filePath);
+    const targetPath = resolvePath(WORKING_DIRECTORY, filePath);
 
     if (!existsSync(targetPath)) {
       return null;
     }
 
-    const linter = new ASTLinter(process.cwd());
+    const linter = new ASTLinter(WORKING_DIRECTORY);
     const result = await linter.lintFile(targetPath);
 
     if (!result.available || !result.issues || result.issues.length === 0) {
@@ -673,7 +678,7 @@ async function runProjectWideLint() {
       return null;
     }
 
-    const linter = new ASTLinter(process.cwd());
+    const linter = new ASTLinter(WORKING_DIRECTORY);
     const result = await linter.lintProjectWide();
 
     if (!result.available) {
@@ -779,7 +784,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 async function handleRead(args) {
   const { file_path, offset, limit } = args;
-  const absPath = resolvePath(process.cwd(), file_path);
+  const absPath = resolvePath(WORKING_DIRECTORY, file_path);
 
   if (!existsSync(absPath)) {
     throw new Error(`File not found: ${absPath}`);
@@ -812,7 +817,7 @@ async function handleRead(args) {
 
 async function handleWrite(args) {
   const { file_path, content } = args;
-  const absPath = resolvePath(process.cwd(), file_path);
+  const absPath = resolvePath(WORKING_DIRECTORY, file_path);
   const fileExists = existsSync(absPath);
 
   if (fileExists) {
@@ -883,7 +888,7 @@ function applyEscapeSafeTransformation(content) {
 
 async function handleEdit(args) {
   const { file_path, old_string, new_string, replace_all = false } = args;
-  const absPath = resolvePath(process.cwd(), file_path);
+  const absPath = resolvePath(WORKING_DIRECTORY, file_path);
 
   if (!existsSync(absPath)) {
     throw new Error(`File not found: ${absPath}`);
@@ -922,7 +927,7 @@ async function handleEdit(args) {
 
 async function handleGlob(args) {
   const { pattern, path, as_array = false } = args;
-  const cwd = path ? resolvePath(process.cwd(), path) : process.cwd();
+  const cwd = path ? resolvePath(WORKING_DIRECTORY, path) : WORKING_DIRECTORY;
 
   const files = await fg(pattern, {
     cwd,
@@ -955,7 +960,7 @@ async function handleGrep(args) {
   return new Promise((resolve, reject) => {
     // Handle null or undefined path by defaulting to current directory
     const safePath = path && typeof path === 'string' ? path : '.';
-    const searchPath = resolvePath(process.cwd(), safePath);
+    const searchPath = resolvePath(WORKING_DIRECTORY, safePath);
     const rgArgs = [pattern, searchPath];
 
     if (options.glob) rgArgs.push('--glob', options.glob);
@@ -1018,7 +1023,7 @@ async function handleBash(args) {
     const child = spawn(command, [], {
       shell: true,
       timeout,
-      cwd: process.cwd(),
+      cwd: WORKING_DIRECTORY,
       env: { ...process.env, TERM: 'xterm-256color' }
     });
 
@@ -1051,7 +1056,7 @@ async function handleBash(args) {
 
 async function handleLS(args) {
   const { path = '.', show_hidden = false, recursive = false, as_array = false } = args;
-  const absPath = resolvePath(process.cwd(), path);
+  const absPath = resolvePath(WORKING_DIRECTORY, path);
 
   if (!existsSync(absPath)) {
     throw new Error(`Path not found: ${absPath}`);
@@ -1153,13 +1158,13 @@ async function handleASTLint(args) {
       return 'ASTLint: AST functionality is not available on this system. The @ast-grep/napi native binding could not be loaded.';
     }
 
-    const targetPath = resolvePath(process.cwd(), path);
+    const targetPath = resolvePath(WORKING_DIRECTORY, path);
 
     if (!existsSync(targetPath)) {
       return `ASTLint: Path not found: ${targetPath}`;
     }
 
-    const linter = new ASTLinter(process.cwd());
+    const linter = new ASTLinter(WORKING_DIRECTORY);
 
     let result;
 
@@ -1231,13 +1236,13 @@ async function handleASTSearch(args) {
       return 'ASTSearch: AST functionality is not available on this system.';
     }
 
-    const targetPath = resolvePath(process.cwd(), path);
+    const targetPath = resolvePath(WORKING_DIRECTORY, path);
 
     if (!existsSync(targetPath)) {
       return `ASTSearch: Path not found: ${targetPath}`;
     }
 
-    const helper = new ASTModificationHelper(process.cwd());
+    const helper = new ASTModificationHelper(WORKING_DIRECTORY);
 
     let result;
     if (statSync(targetPath).isDirectory()) {
@@ -1314,13 +1319,13 @@ async function handleASTReplace(args) {
       return 'ASTReplace: AST functionality is not available on this system.';
     }
 
-    const targetPath = resolvePath(process.cwd(), path);
+    const targetPath = resolvePath(WORKING_DIRECTORY, path);
 
     if (!existsSync(targetPath)) {
       return `ASTReplace: Path not found: ${targetPath}`;
     }
 
-    const helper = new ASTModificationHelper(process.cwd());
+    const helper = new ASTModificationHelper(WORKING_DIRECTORY);
 
     let result;
     if (statSync(targetPath).isDirectory()) {
@@ -1403,13 +1408,13 @@ async function handleASTModify(args) {
       return 'ASTModify: AST functionality is not available on this system.';
     }
 
-    const targetPath = resolvePath(process.cwd(), path);
+    const targetPath = resolvePath(WORKING_DIRECTORY, path);
 
     if (!existsSync(targetPath)) {
       return `ASTModify: Path not found: ${targetPath}`;
     }
 
-    const helper = new ASTModificationHelper(process.cwd());
+    const helper = new ASTModificationHelper(WORKING_DIRECTORY);
 
     let totalChanges = 0;
     let totalFilesModified = 0;
@@ -1544,7 +1549,7 @@ async function handleMCPWorkerCall(worker, msg) {
 
 async function handleExecute(args) {
   const { code } = args;
-  const workingDirectory = process.cwd();
+  const workingDirectory = WORKING_DIRECTORY;
   const execId = randomUUID();
 
   return new Promise((resolve, reject) => {
