@@ -1394,109 +1394,67 @@ async function handleExecute(args) {
     worker.on('message', resultHandler);
 
     // Initialize the worker with MCP tool functions if needed
+    // NOTE: These functions will be eval'd in execution-worker.js context
+    // They use a special __callMCPToolDirect helper that sends messages directly to parent
     const toolFunctions = `
-      global.Read = async (path, offset, limit) => {
-        const callId = "${randomUUID()}";
+      // Helper that sends MCP_CALL directly (not using the 3-param __callMCPTool)
+      const __callMCPToolDirect = async (tool, args) => {
+        const callId = Date.now() + Math.random();
         return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "MCP_CALL", callId, tool: "Read", args: { path, offset, limit } });
+          // Store in pendingMCPCalls (global in execution-worker.js)
+          if (!global.pendingMCPCalls) global.pendingMCPCalls = new Map();
+          global.pendingMCPCalls.set(callId, { resolve, reject });
+
+          process.send({
+            type: 'MCP_CALL',
+            callId,
+            tool,
+            args
+          });
+
+          setTimeout(() => {
+            if (global.pendingMCPCalls.has(callId)) {
+              global.pendingMCPCalls.delete(callId);
+              reject(new Error('MCP call timeout'));
+            }
+          }, 180000);
         });
       };
 
-      global.Write = async (path, content) => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "MCP_CALL", callId, tool: "Write", args: { path, content } });
-        });
+      global.Read = async (file_path, offset, limit) => {
+        return await __callMCPToolDirect('Read', { file_path, offset, limit });
       };
 
-      global.Edit = async (path, oldString, newString, replaceAll) => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "MCP_CALL", callId, tool: "Edit", args: { path, old_string: oldString, new_string: newString, replace_all: replaceAll } });
-        });
+      global.Write = async (file_path, content) => {
+        return await __callMCPToolDirect('Write', { file_path, content });
+      };
+
+      global.Edit = async (file_path, old_string, new_string, replace_all) => {
+        return await __callMCPToolDirect('Edit', { file_path, old_string, new_string, replace_all });
       };
 
       global.Glob = async (pattern, path) => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "MCP_CALL", callId, tool: "Glob", args: { pattern, path } });
-        });
+        return await __callMCPToolDirect('Glob', { pattern, path });
       };
 
       global.Grep = async (pattern, path, options) => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "MCP_CALL", callId, tool: "Grep", args: { pattern, path, options } });
-        });
+        return await __callMCPToolDirect('Grep', { pattern, path, ...options });
       };
 
       global.Bash = async (command, description, timeout) => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "MCP_CALL", callId, tool: "Bash", args: { command, description, timeout } });
-        });
+        return await __callMCPToolDirect('Bash', { command, description, timeout });
+      };
+
+      global.LS = async (path, show_hidden, recursive, as_array) => {
+        return await __callMCPToolDirect('LS', { path, show_hidden, recursive, as_array });
       };
 
       global.TodoWrite = async (todos) => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "MCP_CALL", callId, tool: "TodoWrite", args: { todos } });
-        });
+        return await __callMCPToolDirect('TodoWrite', { todos });
       };
 
       global.WebFetch = async (url) => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "MCP_CALL", callId, tool: "WebFetch", args: { url } });
-        });
-      };
-
-      global.get_server_state = async () => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "GET_SERVER_STATE", callId });
-        });
-      };
-
-      global.kill_execution = async (execId) => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "KILL_EXECUTION", callId, execId });
-        });
-      };
-
-      global.clear_context = async () => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "CLEAR_CONTEXT", callId });
-        });
-      };
-
-      global.get_async_execution = async (execId) => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "GET_ASYNC_EXECUTION", callId, execId });
-        });
-      };
-
-      global.list_async_executions = async () => {
-        const callId = "${randomUUID()}";
-        return new Promise((resolve, reject) => {
-          worker.pendingResults.set(callId, { resolve, reject });
-          worker.send({ type: "LIST_ASYNC_EXECUTIONS", callId });
-        });
+        return await __callMCPToolDirect('WebFetch', { url });
       };
     `;
 
