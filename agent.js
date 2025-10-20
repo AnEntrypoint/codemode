@@ -396,17 +396,17 @@ async function runAgent() {
       let messageCount = 0;
       let hasReceivedMessage = false;
 
-      // Add timeout to detect if we're hanging
+      // Add timeout to detect if we're hanging (adjusted to 180 seconds to prevent false alarms)
       const messageTimeout = setTimeout(() => {
         if (!hasReceivedMessage) {
-          console.log('⚠️  No messages received within 10 seconds - this indicates a communication issue');
+          console.log('⚠️  No messages received within 180 seconds - this indicates a communication issue');
           console.log('🔧 Possible causes:');
           console.log('   - MCP server not starting properly');
           console.log('   - Tool not being registered correctly');
           console.log('   - Query configuration issue');
-          console.log('🚨 CRITICAL: The for-await loop is not iterating at all!');
+          console.log('🚨 CRITICAL: The for-await loop is not iterating at all! (Note: This may be a false alarm if agent is still thinking)');
         }
-      }, 10000);
+      }, 180000);
 
       try {
         for await (const message of agentQuery) {
