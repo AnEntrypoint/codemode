@@ -217,7 +217,23 @@ try {
 if (!mcpConfig.mcpServers) {
     throw new Error('BRUTAL ERROR: mcpConfig.mcpServers is undefined - NO FALLBACKS');
   }
-  const mcpServerNames = Object.keys(mcpConfig.mcpServers).filter(name => name !== 'codeMode');
+
+// Resolve relative script paths to absolute paths relative to package installation
+// This ensures MCP servers can find their scripts regardless of where the user runs the agent from
+const packageDir = dirname(new URL(import.meta.url).pathname);
+for (const [serverName, serverConfig] of Object.entries(mcpConfig.mcpServers)) {
+  if (serverConfig.args && Array.isArray(serverConfig.args)) {
+    serverConfig.args = serverConfig.args.map(arg => {
+      // If arg looks like a relative path to a .js file
+      if (arg.endsWith('.js') && !arg.startsWith('/') && !arg.startsWith('\\') && !arg.match(/^[a-zA-Z]:/)) {
+        return join(packageDir, arg);
+      }
+      return arg;
+    });
+  }
+}
+
+const mcpServerNames = Object.keys(mcpConfig.mcpServers).filter(name => name !== 'codeMode');
 if (mcpServerNames.length > 0) {
   mcpServerNames.forEach((serverName, index) => {
     const server = mcpConfig.mcpServers[serverName];
