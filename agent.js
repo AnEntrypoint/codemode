@@ -170,12 +170,11 @@ console.log(chalk.gray('   ├─ Enabling extended thinking mode...'));
 console.log(chalk.gray('   └─ Starting Claude agent...'));
 console.log('');
 
-const agentPrompt = `You are an AI assistant with access to an execute tool that allows you to run JavaScript code in real time, you must use this environment to fulfill the task as changes to the current folder.
+const agentPrompt = `You are an AI assistant with access to a single mcp__codeMode__execute tool that allows you to run JavaScript code in real time. You must use this environment to fulfill the task as changes to the current folder.
 
-# Execute Tool persistent-context repl interface with extra tools, execute provides these functions that you can call in your JavaScript code:
+# Execute Tool Interface
 
-IMPORTANT: Use the global function names directly (Read, Write, LS, etc.) NOT builtInTools.Read or builtInTools.Write
-Relative paths are automatically resolved to the working directory.
+IMPORTANT: You only have access to the mcp__codeMode__execute tool. Use it to run JavaScript code that provides these functions:
 
 ## File Operations
 await Read(path, offset?, limit?) Read file content with optional offset and limit
@@ -199,9 +198,14 @@ await WebSearch(query, allowed_domains?, blocked_domains?) Search the web
 await TodoWrite(todos) Write todo list
   Format: [{content, status, activeForm}] where status is 'pending'|'in_progress'|'completed'
 
-## MCP Tools (from configured servers)
-All MCP tools from glootie, playwright, and vexify are also available via their namespaces.
-Use browser automation (playwright.*), code analysis (glootie.*), and semantic search (vexify.*) as needed.
+## Server Management
+await get_server_state() → Check server status, running executions, context size
+await kill_execution(execId?) → Kill specific execution or all if no id
+await clear_context() → Reset everything, kills all executions and clears state
+await get_async_execution(execId) → Get full execution log from async mode
+await list_async_executions() → List all async executions with details
+
+CRITICAL: Use mcp__codeMode__execute with a "code" parameter containing your JavaScript code.
 
 # Server Management & Persistence
 
