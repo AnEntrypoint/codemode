@@ -1393,12 +1393,12 @@ async function handleExecute(args) {
     // They use a special __callMCPToolDirect helper that sends messages directly to parent
     const toolFunctions = `
       // Helper that sends MCP_CALL directly (not using the 3-param __callMCPTool)
+      // NOTE: pendingMCPCalls is already defined at top of execution-worker.js
       const __callMCPToolDirect = async (tool, args) => {
         const callId = Date.now() + Math.random();
         return new Promise((resolve, reject) => {
-          // Store in pendingMCPCalls (global in execution-worker.js)
-          if (!global.pendingMCPCalls) global.pendingMCPCalls = new Map();
-          global.pendingMCPCalls.set(callId, { resolve, reject });
+          // Use existing pendingMCPCalls Map from execution-worker.js
+          pendingMCPCalls.set(callId, { resolve, reject });
 
           process.send({
             type: 'MCP_CALL',
@@ -1408,8 +1408,8 @@ async function handleExecute(args) {
           });
 
           setTimeout(() => {
-            if (global.pendingMCPCalls.has(callId)) {
-              global.pendingMCPCalls.delete(callId);
+            if (pendingMCPCalls.has(callId)) {
+              pendingMCPCalls.delete(callId);
               reject(new Error('MCP call timeout'));
             }
           }, 180000);
