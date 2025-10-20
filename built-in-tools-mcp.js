@@ -10,6 +10,16 @@ import fg from 'fast-glob';
 import { Readability } from '@mozilla/readability';
 import fetch from 'node-fetch';
 import ASTLinter, { isAstGrepAvailable } from './ast-grep-wrapper.js';
+import {
+  ToolError,
+  ValidationError,
+  ExecutionError,
+  SearchError,
+  ASTError,
+  PatternError,
+  ToolErrorHandler,
+  ASTPatternValidator
+} from './ast-error-handling.js';
 
 class ASTModificationHelper {
   constructor(workingDirectory = process.cwd()) {
@@ -928,7 +938,9 @@ async function handleGrep(args) {
   const { pattern, path = '.', options = {} } = args;
 
   return new Promise((resolve, reject) => {
-    const searchPath = resolvePath(process.cwd(), path);
+    // Handle null or undefined path by defaulting to current directory
+    const safePath = path && typeof path === 'string' ? path : '.';
+    const searchPath = resolvePath(process.cwd(), safePath);
     const rgArgs = [pattern, searchPath];
 
     if (options.glob) rgArgs.push('--glob', options.glob);

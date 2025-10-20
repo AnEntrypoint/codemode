@@ -4,6 +4,10 @@
 // Communicates with parent via IPC for MCP tool calls
 
 import { createRequire } from 'module';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, unlinkSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 
 // Initialize global scope for user code
 // Note: These will be set to the actual workingDirectory when code executes
@@ -12,6 +16,105 @@ global.__filename = null;
 global.__dirname = null;
 global.module = { exports: {} };
 global.exports = global.module.exports;
+
+// ES module execution helper
+class ESModuleExecutor {
+  constructor() {
+    this.tempDir = join(process.cwd(), '.temp-es-modules');
+    this.ensureTempDir();
+  }
+
+  ensureTempDir() {
+    if (!existsSync(this.tempDir)) {
+      mkdirSync(this.tempDir, { recursive: true });
+    }
+  }
+
+  async executeESModule(code, workingDirectory) {
+    const moduleId = randomUUID();
+    const tempFilePath = join(this.tempDir, `module-${moduleId}.mjs`);
+
+    try {
+      // Prepare the ES module code with proper context
+      const moduleCode = this.prepareModuleCode(code, workingDirectory, tempFilePath);
+
+      // Write the temporary module file
+      writeFileSync(tempFilePath, moduleCode, 'utf8');
+
+      // Execute using dynamic import
+      const moduleUrl = `file://${tempFilePath}`;
+      const module = await import(moduleUrl);
+
+      // Return the module's default export or the module itself
+      return module.default || module;
+
+    } finally {
+      // Clean up temporary file
+      try {
+        unlinkSync(tempFilePath);
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  prepareModuleCode(code, workingDirectory, filePath) {
+    // Prepare module with context variables
+    let moduleCode = code;
+
+    // Check if imports and variables are already present
+    const hasFileURLToPathImport = code.includes('fileURLToPath') && code.includes('import');
+    const hasDirnameImport = code.includes('dirname') && code.includes('import');
+    const hasCreateRequireImport = code.includes('createRequire') && code.includes('import');
+
+    const hasFilenameDecl = code.includes('__filename') && (code.includes('const __filename') || code.includes('let __filename') || code.includes('var __filename'));
+    const hasDirnameDecl = code.includes('__dirname') && (code.includes('const __dirname') || code.includes('let __dirname') || code.includes('var __dirname'));
+    const hasRequireDecl = code.includes('require = ') || code.includes('const require');
+
+    // Build the import prefix only for missing imports
+    let importPrefix = '';
+    if (!hasCreateRequireImport) {
+      importPrefix += `import { createRequire } from 'module';\n`;
+    }
+    if (!hasFileURLToPathImport) {
+      importPrefix += `import { fileURLToPath } from 'url';\n`;
+    }
+    if (!hasDirnameImport) {
+      importPrefix += `import { dirname } from 'path';\n`;
+    }
+
+    // Build the variable declarations only for missing ones
+    let variableSetup = '';
+    if (!hasFilenameDecl) {
+      variableSetup += `const __filename = fileURLToPath(import.meta.url);\n`;
+    }
+    if (!hasDirnameDecl) {
+      variableSetup += `const __dirname = dirname(__filename);\n`;
+    }
+    if (!hasRequireDecl) {
+      variableSetup += `const require = createRequire(import.meta.url);\n`;
+    }
+
+    // Add the context setup if any imports or variables were added
+    if (importPrefix || variableSetup) {
+      moduleCode = importPrefix +
+        (variableSetup ? '\n' + variableSetup : '') +
+        `// Make require available globally for compatibility
+if (!global.require) global.require = require;
+
+` + moduleCode;
+    }
+
+    return moduleCode;
+  }
+
+  isESModule(code) {
+    // Check if code contains ES module import/export syntax
+    return /\bimport\s+.*\s+from\s+['"]|^\s*export\s+/.test(code);
+  }
+}
+
+const esModuleExecutor = new ESModuleExecutor();
 
 const pendingMCPCalls = new Map();
 let nextCallId = 0;
@@ -388,45 +491,60 @@ process.on('message', (msg) => {
         // Strategy: Try multiple approaches to capture the result
         let result;
 
-        // Strategy 1: Try as pure expression (fastest for simple cases)
-        try {
-          result = await eval(`(async () => { return (${code}); })()`);
-        } catch (expressionError) {
-          // Strategy 2: Try to intelligently wrap the code
-          // Check if code has multiple statements by looking for semicolons or newlines
-          const trimmedCode = code.trim();
-          const hasMultipleStatements = trimmedCode.includes(';') || trimmedCode.includes('\n');
+        // Check if this is an ES module
+        if (esModuleExecutor.isESModule(code)) {
+          // Strategy: Use ES module executor for modules with import/export
+          try {
+            result = await esModuleExecutor.executeESModule(code, workingDirectory);
+          } catch (esModuleError) {
+            // Fallback to eval if ES module execution fails
+            try {
+              result = await eval(`(async () => { ${code} })()`);
+            } catch (fallbackError) {
+              throw new Error(`ES module execution failed: ${esModuleError.message}. Fallback eval also failed: ${fallbackError.message}`);
+            }
+          }
+        } else {
+          // Strategy 1: Try as pure expression (fastest for simple cases)
+          try {
+            result = await eval(`(async () => { return (${code}); })()`);
+          } catch (expressionError) {
+            // Strategy 2: Try to intelligently wrap the code
+            // Check if code has multiple statements by looking for semicolons or newlines
+            const trimmedCode = code.trim();
+            const hasMultipleStatements = trimmedCode.includes(';') || trimmedCode.includes('\n');
 
-          if (hasMultipleStatements) {
-            // Strategy 2a: For multi-statement code, try to extract and return last expression
-            // Split by semicolons and newlines to find statements
-            const lines = trimmedCode.split(/[;\n]/).map(l => l.trim()).filter(l => l.length > 0);
+            if (hasMultipleStatements) {
+              // Strategy 2a: For multi-statement code, try to extract and return last expression
+              // Split by semicolons and newlines to find statements
+              const lines = trimmedCode.split(/[;\n]/).map(l => l.trim()).filter(l => l.length > 0);
 
-            if (lines.length > 0) {
-              const lastLine = lines[lines.length - 1];
-              const previousLines = lines.slice(0, -1).join(';\n');
+              if (lines.length > 0) {
+                const lastLine = lines[lines.length - 1];
+                const previousLines = lines.slice(0, -1).join(';\n');
 
-              // Check if last line looks like an expression (not a declaration/control flow)
-              const isDeclaration = /^(const|let|var|function|class|if|for|while|do|switch|try)\s/.test(lastLine);
+                // Check if last line looks like an expression (not a declaration/control flow)
+                const isDeclaration = /^(const|let|var|function|class|if|for|while|do|switch|try)\s/.test(lastLine);
 
-              if (!isDeclaration && previousLines) {
-                // Try executing all but last line, then return last line
-                try {
-                  result = await eval(`(async () => { ${previousLines}; return (${lastLine}); })()`);
-                } catch (splitError) {
-                  // If that fails, execute all as statements
+                if (!isDeclaration && previousLines) {
+                  // Try executing all but last line, then return last line
+                  try {
+                    result = await eval(`(async () => { ${previousLines}; return (${lastLine}); })()`);
+                  } catch (splitError) {
+                    // If that fails, execute all as statements
+                    result = await eval(`(async () => { ${code} })()`);
+                  }
+                } else {
+                  // Last line is a declaration or no previous lines, execute as-is
                   result = await eval(`(async () => { ${code} })()`);
                 }
               } else {
-                // Last line is a declaration or no previous lines, execute as-is
                 result = await eval(`(async () => { ${code} })()`);
               }
             } else {
+              // Strategy 2b: Single statement, execute as-is
               result = await eval(`(async () => { ${code} })()`);
             }
-          } else {
-            // Strategy 2b: Single statement, execute as-is
-            result = await eval(`(async () => { ${code} })()`);
           }
         }
 

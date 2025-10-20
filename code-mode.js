@@ -469,7 +469,8 @@ ${paramNames.map((p, i) => `    if (${safeParamNames[i]} !== null && ${safeParam
 // Global aliases for built-in tools with automatic path resolution
 // Simple path resolution without importing (cross-platform compatible)
 const resolvePath = (filePath) => {
-  if (!filePath) return filePath;
+  // Handle null, undefined, or empty values
+  if (!filePath || typeof filePath !== 'string') return filePath;
   // Check if absolute path (works for both Windows and Unix)
   if (filePath.match(/^([a-zA-Z]:)?[\\\\\\/]/) || filePath.startsWith('/')) return filePath;
   const workingDir = global.__workingDirectory || process.cwd();
