@@ -596,7 +596,7 @@ process.on('message', (msg) => {
           asyncExec.completionTime = Date.now();
         }
 
-        process.send({ type: 'EXEC_RESULT', execId, success: true, output });
+        process.send({ type: 'EXEC_RESULT', execId, success: true, result: output });
       } catch (err) {
         const output = stopCapture();
 
