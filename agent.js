@@ -433,6 +433,47 @@ async function runAgent() {
           }
         }
 
+        // Check for execution completion notifications and unreported logs
+        if (interruptionSystem && interruptionSystem.hasPendingNotifications()) {
+          const notifications = interruptionSystem.getPendingNotifications();
+          if (notifications.length > 0) {
+            // Get the latest notification for each execution
+            const latestNotifications = new Map();
+            for (const notif of notifications) {
+              const key = notif.executionId;
+              if (!latestNotifications.has(key) || notif.timestamp > latestNotifications.get(key).timestamp) {
+                latestNotifications.set(key, notif);
+              }
+            }
+
+            // Format completion notifications with unreported logs
+            const completionMessages = [];
+            for (const [executionId, notif] of latestNotifications) {
+              if (notif.type === 'EXECUTION_COMPLETED' && notif.fullLog) {
+                completionMessages.push(`\n# Execution Completed - ${executionId}\n\n**Unreported Console Logs:**\n\`\`\`\n${notif.fullLog.progress || 'No additional logs'}\n\`\`\`\n**Duration:** ${notif.execution.duration}s\n**Status:** ${notif.execution.status}\n`);
+              } else if (notif.type === 'TASK_NOTIFICATION') {
+                completionMessages.push(`\n# Task Update - ${executionId}\n\n${notif.message}\n`);
+              } else if (notif.type === 'TASK_OVERVIEW') {
+                completionMessages.push(`\n# ${notif.title}\n\n${notif.message}\n`);
+              }
+            }
+
+            if (completionMessages.length > 0) {
+              // Create a follow-up prompt with the completion information
+              const completionPrompt = `${agentPrompt}\n\n# Execution Notifications & Unreported Logs\n${completionMessages.join('\n')}\n\nPlease acknowledge these completions and continue with your current task. The above console logs are now available for your review.`;
+
+              // Mark notifications as processed
+              for (const notif of latestNotifications.values()) {
+                interruptionSystem.markNotificationProcessed(notif.id);
+              }
+
+              // Inject completion information into the conversation
+              await executeTask(completionPrompt);
+              return; // Exit current execution to allow agent to process notifications
+            }
+          }
+        }
+
         messageCount++;
         console.log(`📨 Received message ${messageCount}: ${message.type}`);
         if (message.type === 'text') {

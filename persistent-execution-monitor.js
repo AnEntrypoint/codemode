@@ -27,6 +27,7 @@ class PersistentExecutionMonitor {
     this.completedExecutions = new Set();
     this.finishedExecutions = new Map(); // Track executions that finished but haven't been acknowledged
     this.forceShutdown = false; // Only allow shutdown when explicitly requested
+    this.lastOverviewTime = 0; // Track when last overview was sent
   }
 
   async initialize() {
@@ -260,6 +261,56 @@ class PersistentExecutionMonitor {
     return lines.slice(-5).join('\n');
   }
 
+  async createUnfinishedTasksOverview(executions) {
+    if (executions.length === 0) return;
+
+    const overview = {
+      id: `overview_${Date.now()}`,
+      executionId: 'system_overview',
+      type: 'TASK_OVERVIEW',
+      timestamp: Date.now(),
+      title: 'Unfinished Tasks Overview',
+      message: this.formatOverviewMessage(executions),
+      executions: executions.map(exec => ({
+        id: exec.id,
+        workingDirectory: exec.workingDirectory,
+        startTime: exec.startTime,
+        asyncStartTime: exec.asyncStartTime,
+        duration: Math.round((Date.now() - exec.startTime) / 1000),
+        isKilled: exec.killed
+      }))
+    };
+
+    await this.addToAgentQueue(overview, true); // High priority for overview
+    console.log(`[Persistent Monitor] Sent overview of ${executions.length} unfinished tasks`);
+  }
+
+  formatOverviewMessage(executions) {
+    const lines = [`**Unfinished Tasks Overview (${executions.length} active executions):**\n`];
+
+    for (const exec of executions) {
+      const duration = Math.round((Date.now() - exec.startTime) / 1000);
+      const status = exec.isKilled ? 'Killed' : 'Running';
+      lines.push(`- **${exec.id}**: ${status} for ${duration}s`);
+
+      // Get recent progress for this execution
+      try {
+        const progress = await this.getExecutionProgress(exec.id);
+        if (progress && progress.progress) {
+          const recentLines = progress.progress.split('\n').slice(-3);
+          if (recentLines.length > 0) {
+            lines.push(`  Recent output: ${recentLines.join(' | ')}`);
+          }
+        }
+      } catch (e) {
+        // Progress check failed, continue without it
+      }
+    }
+
+    lines.push('\n*These tasks are still running and will be notified upon completion.*');
+    return lines.join('\n');
+  }
+
   async createCompletionNotification(execution, fullLog = null) {
     const duration = Math.round((Date.now() - execution.startTime) / 1000);
     const finishedAt = execution.finishedAt || Date.now();
@@ -387,6 +438,14 @@ class PersistentExecutionMonitor {
         console.log('[Persistent Monitor] No active executions or pending notifications - stopping monitoring');
         this.stop();
         return;
+      }
+
+      // Every 60 seconds, provide overview of unfinished tasks
+      const now = Date.now();
+      const timeSinceLastOverview = now - (this.lastOverviewTime || 0);
+      if (timeSinceLastOverview >= 60000 && hasActiveExecutions) {
+        this.lastOverviewTime = now;
+        await this.createUnfinishedTasksOverview(executions);
       }
 
       // Check for long-running executions that need attention
