@@ -8,7 +8,6 @@ import { existsSync, readFileSync } from 'fs';
 import chalk from 'chalk';
 import hljs from 'highlight.js';
 import EnhancedInteractiveMode from './enhanced-interactive-mode.js';
-import AgentInterruptionSystem from './agent-interruption-system.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -81,8 +80,11 @@ const originalCwd = process.cwd();
 let interruptionSystem = null;
 async function initializeInterruptionSystem() {
   try {
-    interruptionSystem = new AgentInterruptionSystem();
-    await interruptionSystem.initialize((interruption) => {
+    // Try to import AgentInterruptionSystem dynamically
+    const interruptionModule = await import('./agent-interruption-system.js').catch(() => null);
+    if (interruptionModule && interruptionModule.default) {
+      interruptionSystem = new interruptionModule.default();
+      await interruptionSystem.initialize((interruption) => {
       if (interruption) {
         console.log('');
         console.log(chalk.yellow.bold('🔔 PERSISTENT TASK NOTIFICATION:'));
@@ -97,8 +99,11 @@ async function initializeInterruptionSystem() {
         });
         console.log('');
       }
-    });
-    console.log(chalk.green('   ✓ Persistent execution monitoring initialized'));
+      });
+      console.log(chalk.green('   ✓ Persistent execution monitoring initialized'));
+    } else {
+      console.log(chalk.yellow('   ⚠ AgentInterruptionSystem not available - running without persistent monitoring'));
+    }
   } catch (error) {
     console.log(chalk.yellow('   ⚠ Warning: Failed to initialize interruption system:', error.message));
   }
