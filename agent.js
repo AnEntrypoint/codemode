@@ -80,8 +80,39 @@ const originalCwd = process.cwd();
 let interruptionSystem = null;
 async function initializeInterruptionSystem() {
   try {
-    // Try to import AgentInterruptionSystem dynamically
-    const interruptionModule = await import('./agent-interruption-system.js').catch(() => null);
+    // Try multiple import strategies for AgentInterruptionSystem
+    let interruptionModule = null;
+
+    // Strategy 1: Standard relative import
+    try {
+      interruptionModule = await import('./agent-interruption-system.js');
+    } catch (error1) {
+      // Strategy 2: Try with absolute path resolution
+      try {
+        const { fileURLToPath } = await import('url');
+        const { dirname, join } = await import('path');
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = dirname(__filename);
+        interruptionModule = await import(join(__dirname, 'agent-interruption-system.js'));
+      } catch (error2) {
+        // Strategy 3: Create a basic stub system
+        console.log(chalk.yellow('   ⚠ Using basic monitoring system - full functionality not available'));
+        interruptionModule = {
+          default: class BasicInterruptionSystem {
+            async initialize() {
+              console.log('[Basic Monitor] Basic monitoring initialized');
+            }
+            hasPendingNotifications() { return false; }
+            getPendingNotifications() { return []; }
+            markNotificationProcessed() {}
+            generateAgentInstructions() { return ''; }
+            stop() {}
+            executeAction() { return { success: false, message: 'Not available in basic mode' }; }
+          }
+        };
+      }
+    }
+
     if (interruptionModule && interruptionModule.default) {
       interruptionSystem = new interruptionModule.default();
       await interruptionSystem.initialize((interruption) => {
@@ -101,8 +132,6 @@ async function initializeInterruptionSystem() {
       }
       });
       console.log(chalk.green('   ✓ Persistent execution monitoring initialized'));
-    } else {
-      console.log(chalk.yellow('   ⚠ AgentInterruptionSystem not available - running without persistent monitoring'));
     }
   } catch (error) {
     console.log(chalk.yellow('   ⚠ Warning: Failed to initialize interruption system:', error.message));

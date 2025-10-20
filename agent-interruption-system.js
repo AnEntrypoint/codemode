@@ -3,6 +3,7 @@
 // Agent Interruption System
 // Integrates with persistent execution monitor to provide task notifications to agents
 
+// Import strategy for cross-compatibility
 import PersistentExecutionMonitor from './persistent-execution-monitor.js';
 
 class AgentInterruptionSystem {
