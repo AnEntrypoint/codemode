@@ -365,9 +365,9 @@ async function runAgent() {
       console.log('🔍 Starting task execution...');
       console.log(`📝 Task prompt: ${taskPrompt.substring(0, 100)}...`);
 
-      // Use the task prompt from the agent
-      console.log('🎯 Using task prompt with working directory fix...');
-      const testPrompt = taskPrompt;
+      // Use a simplified test prompt to prevent hanging from complex nested prompts
+      console.log('🎯 Using simplified test prompt to prevent hanging...');
+      const testPrompt = `Task: ${task.substring(0, 100)}${task.length > 100 ? '...' : ''}`;
 
       try {
         console.log('🔧 Creating agent query with proper MCP server configuration...');
