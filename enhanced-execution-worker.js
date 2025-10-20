@@ -107,8 +107,10 @@ class SyntaxValidator {
     };
 
     try {
-      // Basic syntax check
-      new Function(code);
+      // Basic syntax check - wrap in async function to allow top-level await
+      const hasAwait = code.includes('await');
+      const wrappedCode = hasAwait ? `(async () => { ${code} })()` : code;
+      new Function(wrappedCode);
 
       // More detailed analysis
       const lines = code.split('\n');
@@ -136,10 +138,8 @@ class SyntaxValidator {
         }
       });
 
-      // Check for proper async/await usage
-      if (code.includes('await') && !code.includes('async')) {
-        result.warnings.push('Await found without async function');
-      }
+      // Note: Top-level await is allowed in the execution environment
+      // No need to warn about it
 
       // Check for proper error handling
       if (code.includes('try') && !code.includes('catch')) {
@@ -610,6 +610,58 @@ const runningExecutions = new Map(); // Track running executions
 const asyncExecutions = new Map(); // Track async executions after handover
 const asyncHandoverTimeout = 30000; // 30 seconds default
 
+// Periodic execution reporting
+let executionReportTimer = null;
+const executionReportInterval = 60000; // 60 seconds
+
+function startExecutionReporting() {
+  if (executionReportTimer) {
+    clearInterval(executionReportTimer);
+  }
+
+  executionReportTimer = setInterval(() => {
+    const runningCount = runningExecutions.size;
+    const asyncCount = asyncExecutions.size;
+
+    if (runningCount > 0 || asyncCount > 0) {
+      const report = {
+        timestamp: Date.now(),
+        runningExecutions: Array.from(runningExecutions.entries()).map(([id, exec]) => ({
+          id,
+          startTime: exec.startTime,
+          duration: Math.round((Date.now() - exec.startTime) / 1000),
+          isAsync: exec.isAsync,
+          outputLines: exec.outputHistory.length
+        })),
+        asyncExecutions: Array.from(asyncExecutions.entries()).map(([id, exec]) => ({
+          id,
+          startTime: exec.startTime,
+          asyncStartTime: exec.asyncStartTime,
+          duration: Math.round((Date.now() - exec.startTime) / 1000),
+          outputLines: exec.outputHistory.length,
+          completed: exec.completed || false
+        }))
+      };
+
+      process.send({
+        type: 'EXECUTION_REPORT',
+        report
+      });
+    }
+  }, executionReportInterval);
+}
+
+function stopExecutionReporting() {
+  if (executionReportTimer) {
+    clearInterval(executionReportTimer);
+    executionReportTimer = null;
+  }
+}
+
+// Interactive session management
+const interactiveSessions = new Map(); // Track interactive sessions with stdin/stdout
+const stdinQueues = new Map(); // Queue stdin writes for interactive sessions
+
 // Capture console output
 let capturedOutput = '';
 const originalConsoleLog = console.log;
@@ -727,8 +779,8 @@ function moveToAsyncMode(execId) {
     `[${new Date(entry.timestamp).toISOString()}] ${entry.message}`
   ).join('\n');
 
-  // Clear output history to save memory (as requested)
-  execution.outputHistory = [];
+  // DO NOT clear output history - keep it for retrieval
+  // execution.outputHistory will continue to accumulate
 
   // Move to async executions
   runningExecutions.delete(execId);
@@ -749,7 +801,7 @@ function moveToAsyncMode(execId) {
     }
   });
 
-  console.log(`[Async Handover] Execution ${execId} moved to async mode, history cleared`);
+  console.log(`[Async Handover] Execution ${execId} moved to async mode, continuing to run`);
 }
 
 // Enhanced error handler
@@ -988,6 +1040,46 @@ process.on('message', async (msg) => {
         error: 'Async execution not found'
       });
     }
+  } else if (msg.type === 'STDIN_WRITE') {
+    // Handle stdin write to interactive session
+    const { execId, data } = msg;
+
+    // Check if this is the first stdin write - if so, mark session as interactive
+    if (!interactiveSessions.has(execId)) {
+      operationLogger.log('INTERACTIVE_SESSION_DETECTED', { execId });
+
+      const execution = runningExecutions.get(execId) || asyncExecutions.get(execId);
+      if (execution) {
+        execution.isInteractive = true;
+        interactiveSessions.set(execId, {
+          startTime: Date.now(),
+          promptQueue: [],
+          waitingForPrompt: false
+        });
+
+        // Notify parent that session is now interactive with persistent prompt
+        process.send({
+          type: 'INTERACTIVE_SESSION_START',
+          execId,
+          message: 'Session is now interactive - showing persistent prompt'
+        });
+      }
+    }
+
+    // Queue the stdin data for eager delivery
+    const session = interactiveSessions.get(execId);
+    if (session) {
+      session.promptQueue.push(data);
+      operationLogger.log('STDIN_QUEUED', { execId, queueLength: session.promptQueue.length });
+
+      // If execution is waiting for input, deliver immediately
+      if (session.waitingForPrompt && session.stdinResolver) {
+        const queuedData = session.promptQueue.shift();
+        session.stdinResolver(queuedData);
+        session.stdinResolver = null;
+        session.waitingForPrompt = false;
+      }
+    }
   } else if (msg.type === 'EXECUTE') {
     const execId = msg.execId;
     const code = msg.code;
@@ -1196,6 +1288,31 @@ process.on('message', async (msg) => {
     // Generate tool functions that call back to parent
     eval(toolFunctions);
 
+    // Global stdin reader for interactive sessions
+    global.readStdin = async function(execId) {
+      const session = interactiveSessions.get(execId);
+      if (!session) {
+        throw new Error('Not an interactive session');
+      }
+
+      // If queue has data, return immediately
+      if (session.promptQueue.length > 0) {
+        return session.promptQueue.shift();
+      }
+
+      // Otherwise, wait for stdin data
+      session.waitingForPrompt = true;
+      process.send({
+        type: 'WAITING_FOR_STDIN',
+        execId,
+        message: 'Execution is waiting for stdin input'
+      });
+
+      return new Promise((resolve) => {
+        session.stdinResolver = resolve;
+      });
+    };
+
     // Enhanced clear_context function
     global.clear_context = () => {
       operationLogger.log('CLEAR_CONTEXT');
@@ -1263,6 +1380,10 @@ process.on('message', async (msg) => {
     originalConsoleLog('[Management] Use execute tool actions for async execution management');
     originalConsoleLog('[Management] Use clear_context() to reset everything');
 
+    // Start periodic execution reporting
+    startExecutionReporting();
+    originalConsoleLog('[Monitoring] Periodic execution reporting started (60 second interval)');
+
     process.send({ type: 'INIT_COMPLETE' });
   }
 });
@@ -1299,6 +1420,7 @@ process.on('SIGINT', () => {
   operationLogger.log('SIGINT_RECEIVED');
   originalConsoleLog('[Enhanced execution worker] Received SIGINT, shutting down...');
   healthMonitor.stopMonitoring();
+  stopExecutionReporting();
   process.exit(0);
 });
 
@@ -1306,6 +1428,7 @@ process.on('SIGTERM', () => {
   operationLogger.log('SIGTERM_RECEIVED');
   originalConsoleLog('[Enhanced execution worker] Received SIGTERM, shutting down...');
   healthMonitor.stopMonitoring();
+  stopExecutionReporting();
   process.exit(0);
 });
 

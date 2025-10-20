@@ -271,6 +271,19 @@ class ExecutionContextManager {
             result: error.message
           });
         }
+      } else if (msg.type === 'STREAM_OUTPUT') {
+        // Progressive stdout streaming
+        const { execId, output } = msg;
+        process.stdout.write(output + '\n');
+      } else if (msg.type === 'INTERACTIVE_SESSION_START') {
+        // Execution became interactive - show persistent prompt
+        const { execId, message } = msg;
+        console.error(`[Execution Context] ${message} (execId: ${execId})`);
+        console.error('[Execution Context] Stdin writes will be eagerly queued and delivered immediately');
+      } else if (msg.type === 'WAITING_FOR_STDIN') {
+        // Execution is waiting for stdin input
+        const { execId, message } = msg;
+        console.error(`[Execution Context] ${message} (execId: ${execId})`);
       } else if (msg.type === 'EXEC_RESULT') {
         // Execution completed
         const { execId, success, output, error } = msg;
@@ -337,6 +350,29 @@ class ExecutionContextManager {
       } else if (msg.type === 'OPERATION_LOG') {
         // Worker reports operation log
         console.error('[Execution Context] Operation log received');
+      } else if (msg.type === 'EXECUTION_REPORT') {
+        // Worker reports periodic execution status
+        const { report } = msg;
+        console.error('[Execution Context] Execution report:', JSON.stringify(report, null, 2));
+
+        // Forward as eager prompt for agent awareness
+        // This will be handled by the agent to show execution progress
+        if (report.runningExecutions.length > 0 || report.asyncExecutions.length > 0) {
+          const summary = [];
+          if (report.runningExecutions.length > 0) {
+            summary.push(`Running: ${report.runningExecutions.length} execution(s)`);
+            report.runningExecutions.forEach(exec => {
+              summary.push(`  - ID ${exec.id}: ${exec.duration}s (${exec.outputLines} lines)`);
+            });
+          }
+          if (report.asyncExecutions.length > 0) {
+            summary.push(`Async: ${report.asyncExecutions.length} execution(s)`);
+            report.asyncExecutions.forEach(exec => {
+              summary.push(`  - ID ${exec.id}: ${exec.duration}s (${exec.outputLines} lines)${exec.completed ? ' [COMPLETED]' : ''}`);
+            });
+          }
+          console.error('[Execution Context] Summary:\n' + summary.join('\n'));
+        }
       }
     });
 
@@ -555,6 +591,18 @@ global.Grep = async (pattern, grepPath, options) => await builtInTools.Grep({ pa
     });
   }
 
+  sendStdin(execId, data) {
+    if (!this.worker || !this.initialized) {
+      throw new Error('Execution worker not initialized');
+    }
+
+    this.worker.send({
+      type: 'STDIN_WRITE',
+      execId,
+      data
+    });
+  }
+
   clearContext() {
     if (this.worker && this.initialized) {
       this.worker.send({
@@ -632,11 +680,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             action: {
               type: 'string',
-              description: 'Management action. Valid values: "kill", "get_async_log", "list_async_executions", "clear_history", "get_progress". Used only when no code is provided.'
+              description: 'Management action. Valid values: "kill", "get_async_log", "list_async_executions", "clear_history", "get_progress", "send_stdin". Used only when no code is provided.'
             },
             executionId: {
               type: 'string',
-              description: 'Execution ID for kill, get_async_log, clear_history, or get_progress actions'
+              description: 'Execution ID for kill, get_async_log, clear_history, get_progress, or send_stdin actions'
+            },
+            stdinData: {
+              type: 'string',
+              description: 'Data to send to stdin (used with send_stdin action)'
             },
             clearHistory: {
               type: 'boolean',
@@ -826,6 +878,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             } else {
               return {
                 content: [{ type: 'text', text: executionId ? 'Execution context not initialized' : 'executionId required for get_progress' }],
+                isError: true
+              };
+            }
+
+          case 'send_stdin':
+            if (executionContext && executionId && args.stdinData !== undefined) {
+              executionContext.sendStdin(executionId, args.stdinData);
+              return {
+                content: [{ type: 'text', text: `Stdin data sent to execution ${executionId}` }]
+              };
+            } else {
+              return {
+                content: [{ type: 'text', text: 'executionId and stdinData required for send_stdin' }],
                 isError: true
               };
             }

@@ -3,10 +3,9 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { spawn, fork } from 'child_process';
+import { spawn } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'fs';
 import { join, resolve as resolvePath, dirname, basename } from 'path';
-import { randomUUID } from 'crypto';
 import fg from 'fast-glob';
 import { Readability } from '@mozilla/readability';
 import fetch from 'node-fetch';
@@ -22,9 +21,9 @@ import {
   ASTPatternValidator
 } from './ast-error-handling.js';
 
-// Get working directory from environment or use WORKING_DIRECTORY
+// Get working directory from environment or use process.cwd()
 // This allows the MCP server to operate on the correct directory when spawned by Anthropic SDK
-const WORKING_DIRECTORY = process.env.CODEMODE_WORKING_DIRECTORY || WORKING_DIRECTORY;
+const WORKING_DIRECTORY = process.env.CODEMODE_WORKING_DIRECTORY || process.cwd();
 console.error('[built-in-tools-mcp] Working directory:', WORKING_DIRECTORY);
 
 class ASTModificationHelper {
@@ -386,17 +385,160 @@ const server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
-      // ONLY expose the execute tool - all other tools (Read, Write, Edit, etc.)
-      // are available INSIDE the execute environment, not directly to the agent
+      // Built-in tools that mirror Claude's internal tools
+      // Note: Read and Write are now exposed directly to the agent, not via builtInTools
+      // They're still available INSIDE the execute environment via code-mode.js
       {
-        name: 'mcp__codeMode__execute',
-        description: 'Execute JavaScript code in a persistent server environment with access to file operations, search, and management functions. Available functions: Read(path, offset?, limit?), Write(path, content), Edit(path, oldString, newString, replaceAll?), Glob(pattern, path?), Grep(pattern, path?, options?), Bash(command, description?, timeout?), TodoWrite(todos), WebFetch(url), get_server_state(), kill_execution(execId?), clear_context(), get_async_execution(execId), list_async_executions()',
+        name: 'Edit',
+        description: 'Perform exact string replacements in files',
         inputSchema: {
           type: 'object',
           properties: {
-            code: { type: 'string', description: 'JavaScript code to execute in the persistent server environment. Use await for all function calls. Example: await Read("file.txt")' }
+            file_path: { type: 'string', description: 'Absolute path to file' },
+            old_string: { type: 'string', description: 'Text to replace' },
+            new_string: { type: 'string', description: 'Replacement text' },
+            replace_all: { type: 'boolean', description: 'Replace all occurrences' }
           },
-          required: ['code']
+          required: ['file_path', 'old_string', 'new_string']
+        }
+      },
+      {
+        name: 'Glob',
+        description: 'Fast file pattern matching',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            pattern: { type: 'string', description: 'Glob pattern (e.g., "**/*.js")' },
+            path: { type: 'string', description: 'Directory to search' },
+            as_array: { type: 'boolean', description: 'Return as JSON array' }
+          },
+          required: ['pattern']
+        }
+      },
+      {
+        name: 'Grep',
+        description: 'Powerful content search using ripgrep',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            pattern: { type: 'string', description: 'Regular expression pattern' },
+            path: { type: 'string', description: 'File/directory to search' },
+            options: { type: 'object', description: 'Search options (glob, type, output_mode, etc.)' }
+          },
+          required: ['pattern']
+        }
+      },
+      {
+        name: 'Bash',
+        description: 'Execute shell commands',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            command: { type: 'string', description: 'Shell command to execute' },
+            description: { type: 'string', description: 'Clear description of command' },
+            timeout: { type: 'number', description: 'Timeout in milliseconds' }
+          },
+          required: ['command']
+        }
+      },
+      {
+        name: 'LS',
+        description: 'List directory contents',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path to list' },
+            show_hidden: { type: 'boolean', description: 'Show hidden files' },
+            recursive: { type: 'boolean', description: 'Recursive listing' },
+            as_array: { type: 'boolean', description: 'Return as JSON array' }
+          }
+        }
+      },
+      {
+        name: 'TodoWrite',
+        description: 'Create and manage structured task lists',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            todos: { type: 'array', description: 'Array of todo objects' }
+          },
+          required: ['todos']
+        }
+      },
+      {
+        name: 'WebFetch',
+        description: 'Retrieve and analyze web content',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'URL to fetch' }
+          },
+          required: ['url']
+        }
+      },
+      {
+        name: 'ASTLint',
+        description: 'AST-based code linting',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File or directory path' },
+            recursive: { type: 'boolean', description: 'Recursive search' },
+            extensions: { type: 'array', description: 'File extensions to lint' },
+            maxFiles: { type: 'number', description: 'Maximum files to lint' },
+            groupBy: { type: 'string', description: 'Group results by severity' }
+          },
+          required: ['path']
+        }
+      },
+      {
+        name: 'ASTSearch',
+        description: 'AST pattern matching for code search',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File or directory path' },
+            pattern: { type: 'string', description: 'AST pattern to search' },
+            language: { type: 'string', description: 'Programming language' },
+            recursive: { type: 'boolean', description: 'Recursive search' },
+            maxFiles: { type: 'number', description: 'Maximum files to search' },
+            maxMatches: { type: 'number', description: 'Maximum matches per file' },
+            includeContext: { type: 'boolean', description: 'Include surrounding context' }
+          },
+          required: ['path', 'pattern']
+        }
+      },
+      {
+        name: 'ASTReplace',
+        description: 'AST-based code replacement',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File or directory path' },
+            pattern: { type: 'string', description: 'AST pattern to replace' },
+            replacement: { type: 'string', description: 'Replacement text' },
+            language: { type: 'string', description: 'Programming language' },
+            recursive: { type: 'boolean', description: 'Recursive search' },
+            maxFiles: { type: 'number', description: 'Maximum files to modify' },
+            dryRun: { type: 'boolean', description: 'Dry run mode' }
+          },
+          required: ['path', 'pattern', 'replacement']
+        }
+      },
+      {
+        name: 'ASTModify',
+        description: 'Multiple AST transformations',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File or directory path' },
+            transformations: { type: 'array', description: 'Array of transformation objects' },
+            language: { type: 'string', description: 'Programming language' },
+            dryRun: { type: 'boolean', description: 'Dry run mode' },
+            recursive: { type: 'boolean', description: 'Recursive search' },
+            maxFiles: { type: 'number', description: 'Maximum files to modify' }
+          },
+          required: ['path', 'transformations']
         }
       }
     ]
@@ -521,9 +663,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case 'ASTModify':
         result = await handleASTModify(args);
-        break;
-      case 'mcp__codeMode__execute':
-        result = await handleExecute(args);
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);
@@ -1260,212 +1399,6 @@ async function handleASTModify(args) {
   } catch (error) {
     return `ASTModify error: ${error.message}`;
   }
-}
-
-// Store execution workers for persistent server functionality
-const executionWorkers = new Map();
-
-async function handleMCPWorkerCall(worker, msg) {
-  const { callId, tool, args } = msg;
-
-  try {
-    let result;
-
-    // Call the appropriate tool handler
-    switch (tool) {
-      case 'Read':
-        result = await handleRead(args);
-        break;
-      case 'Write':
-        result = await handleWrite(args);
-        break;
-      case 'Edit':
-        result = await handleEdit(args);
-        break;
-      case 'Glob':
-        result = await handleGlob(args);
-        break;
-      case 'Grep':
-        result = await handleGrep(args);
-        break;
-      case 'Bash':
-        result = await handleBash(args);
-        break;
-      case 'TodoWrite':
-        result = await handleTodoWrite(args);
-        break;
-      case 'WebFetch':
-        result = await handleWebFetch(args);
-        break;
-      case 'LS':
-        result = await handleLS(args);
-        break;
-      default:
-        throw new Error(`Unknown tool: ${tool}`);
-    }
-
-    // Send success result back to worker
-    worker.send({
-      type: 'MCP_RESULT',
-      callId,
-      success: true,
-      result
-    });
-
-  } catch (error) {
-    // Send error result back to worker
-    worker.send({
-      type: 'MCP_RESULT',
-      callId,
-      success: false,
-      result: error.message
-    });
-  }
-}
-
-async function handleExecute(args) {
-  const { code } = args;
-  const workingDirectory = WORKING_DIRECTORY;
-  const execId = randomUUID();
-
-  return new Promise((resolve, reject) => {
-    // Check if we have a running execution worker for this directory
-    let worker = executionWorkers.get(workingDirectory);
-
-    if (!worker || worker.killed) {
-      // Start new execution worker using fork (not spawn) to get IPC support
-      const workerPath = join(dirname(new URL(import.meta.url).pathname), 'execution-worker.js');
-      worker = fork(workerPath, [], {
-        cwd: workingDirectory,
-        env: { ...process.env },
-        stdio: ['inherit', 'inherit', 'inherit', 'ipc']
-      });
-
-      worker.killed = false;
-      worker.pendingResults = new Map();
-
-      // Set up message handling (only for MCP_CALL, not EXEC_RESULT)
-      // EXEC_RESULT is handled by per-execution resultHandler below
-      worker.on('message', (msg) => {
-        if (msg.type === 'MCP_CALL') {
-          // Handle MCP tool calls from the execution worker
-          handleMCPWorkerCall(worker, msg);
-        }
-      });
-
-      worker.on('error', (error) => {
-        reject(new Error(`Execution worker error: ${error.message}`));
-      });
-
-      worker.on('exit', (code) => {
-        worker.killed = true;
-        executionWorkers.delete(workingDirectory);
-        if (code !== 0) {
-          reject(new Error(`Execution worker exited with code ${code}`));
-        }
-      });
-
-      executionWorkers.set(workingDirectory, worker);
-    }
-
-    // Set up timeout for this specific execution
-    const timeout = setTimeout(() => {
-      reject(new Error('Execution timeout (30s) - use async operations for long-running tasks'));
-    }, 30000);
-
-    // Set up one-time result handler for this execution
-    const resultHandler = (msg) => {
-      if (msg.type === 'EXEC_RESULT' && msg.execId === execId) {
-        clearTimeout(timeout);
-        worker.off('message', resultHandler);
-        if (msg.success) {
-          resolve(msg.result);
-        } else {
-          reject(new Error(msg.error));
-        }
-      }
-    };
-
-    worker.on('message', resultHandler);
-
-    // Initialize the worker with MCP tool functions if needed
-    // NOTE: These functions will be eval'd in execution-worker.js context
-    // They use a special __callMCPToolDirect helper that sends messages directly to parent
-    const toolFunctions = `
-      // Helper that sends MCP_CALL directly (not using the 3-param __callMCPTool)
-      // NOTE: pendingMCPCalls is already defined at top of execution-worker.js
-      const __callMCPToolDirect = async (tool, args) => {
-        const callId = Date.now() + Math.random();
-        return new Promise((resolve, reject) => {
-          // Use existing pendingMCPCalls Map from execution-worker.js
-          pendingMCPCalls.set(callId, { resolve, reject });
-
-          process.send({
-            type: 'MCP_CALL',
-            callId,
-            tool,
-            args
-          });
-
-          setTimeout(() => {
-            if (pendingMCPCalls.has(callId)) {
-              pendingMCPCalls.delete(callId);
-              reject(new Error('MCP call timeout'));
-            }
-          }, 180000);
-        });
-      };
-
-      global.Read = async (file_path, offset, limit) => {
-        return await __callMCPToolDirect('Read', { file_path, offset, limit });
-      };
-
-      global.Write = async (file_path, content) => {
-        return await __callMCPToolDirect('Write', { file_path, content });
-      };
-
-      global.Edit = async (file_path, old_string, new_string, replace_all) => {
-        return await __callMCPToolDirect('Edit', { file_path, old_string, new_string, replace_all });
-      };
-
-      global.Glob = async (pattern, path) => {
-        return await __callMCPToolDirect('Glob', { pattern, path });
-      };
-
-      global.Grep = async (pattern, path, options) => {
-        return await __callMCPToolDirect('Grep', { pattern, path, ...options });
-      };
-
-      global.Bash = async (command, description, timeout) => {
-        return await __callMCPToolDirect('Bash', { command, description, timeout });
-      };
-
-      global.LS = async (path, show_hidden, recursive, as_array) => {
-        return await __callMCPToolDirect('LS', { path, show_hidden, recursive, as_array });
-      };
-
-      global.TodoWrite = async (todos) => {
-        return await __callMCPToolDirect('TodoWrite', { todos });
-      };
-
-      global.WebFetch = async (url) => {
-        return await __callMCPToolDirect('WebFetch', { url });
-      };
-    `;
-
-    // Initialize tools and send execute command
-    worker.send({ type: 'INIT_TOOLS', toolFunctions });
-
-    // Wait a bit for initialization
-    setTimeout(() => {
-      worker.send({
-        type: 'EXECUTE',
-        execId,
-        code,
-        workingDirectory
-      });
-    }, 100);
-  });
 }
 
 async function main() {

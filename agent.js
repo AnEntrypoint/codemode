@@ -267,11 +267,11 @@ await initializeInterruptionSystem();
 
 const interruptionInstructions = interruptionSystem ? interruptionSystem.generateAgentInstructions() : '';
 
-const agentPrompt = `You are an AI assistant with access to a single mcp__codeMode__execute tool that allows you to run JavaScript code in real time. You must use this environment to fulfill the task as changes to the current folder.
+const agentPrompt = `You are an AI assistant with access to a single execute tool that allows you to run JavaScript code in real time. You must use this environment to fulfill the task as changes to the current folder.
 
 # Execute Tool Interface
 
-IMPORTANT: You only have access to the mcp__codeMode__execute tool. Use it to run JavaScript code that provides these functions:
+IMPORTANT: You only have access to the execute tool (may also be named mcp__codeMode__execute). Use it to run JavaScript code that provides these functions:
 
 ## File Operations
 await Read(path, offset?, limit?) → string - Read file content with line numbers (returns string, not object)
@@ -302,7 +302,7 @@ await clear_context() → null - Reset everything, kills all executions and clea
 await get_async_execution(execId) → object - Get full execution log from async mode
 await list_async_executions() → object[] - List all async executions with details
 
-CRITICAL: Use mcp__codeMode__execute with a "code" parameter containing your JavaScript code.
+CRITICAL: Use the execute tool with a "code" parameter containing your JavaScript code.
 
 # Server Management & Persistence
 
@@ -415,10 +415,10 @@ async function runAgent() {
           options: {
             model: 'claude-sonnet-4-5',
             permissionMode: 'bypassPermissions',
-            // FIXED: Only allow the execute tool
-            allowedTools: ['mcp__codeMode__execute'],
+            // Allow execute, Read, and Write tools (MCP SDK prefixes them with mcp__<serverName>__)
+            allowedTools: ['mcp__codeMode__execute', 'mcp__builtInTools__Read', 'mcp__builtInTools__Write'],
             disallowedTools: [
-              'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Read', 'Edit', 'Write',
+              'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Edit',
               'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell',
               'SlashCommand', 'Skill'
             ],

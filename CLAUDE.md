@@ -13,6 +13,8 @@ This document provides comprehensive analysis of all available tools in this Cla
 
 3. **Agent Control**: Agent can kill any execution via execute tool with special parameters.
 
+4. **Periodic Execution Reports**: Every 60 seconds, the system reports on all running executions, replacing the previous report. This provides the agent with visibility into long-running tasks.
+
 ### Implementation Requirements
 
 - **Default async handover time**: 30 seconds
@@ -20,6 +22,10 @@ This document provides comprehensive analysis of all available tools in this Cla
 - **Execute tool special params**: Support for management operations (kill, retrieve async logs)
 - **No execution timeouts**: Remove all timeout mechanisms - agent controls lifecycle
 - **Seamless transition**: Blocking → Async should be transparent with history preservation
+- **Periodic reporting**: Every 60 seconds, report on running executions to stderr (visible to agent)
+  - Reports include: execution ID, duration, output line count, async status
+  - Previous reports are replaced (not accumulated)
+  - Only reports when executions are active
 
 ### Execute Tool Special Parameters
 
