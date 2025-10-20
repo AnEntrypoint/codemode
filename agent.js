@@ -194,6 +194,7 @@ additionalTools = `\n\n# Additional Tool Documentation\n\n${startMd}\n\n${wfgyHo
 console.log(chalk.cyan.bold('2️⃣  Loading MCP Servers'));
 
 const configPath = join(process.cwd(), '.codemode.json');
+const defaultConfigPath = join(dirname(new URL(import.meta.url).pathname), '.codemode.json');
 let mcpConfig = { mcpServers: {} };
 
 try {
@@ -201,13 +202,16 @@ try {
     mcpConfig = JSON.parse(readFileSync(configPath, 'utf8'));
     console.log(chalk.gray(`   ├─ Config loaded from: ${configPath}`));
   } else {
-    console.error(chalk.red.bold(`BRUTAL ERROR: Config file not found at ${configPath} - NO FALLBACKS - Create .codemode.json in current working directory`));
-    throw new Error(`BRUTAL ERROR: Config file not found: ${configPath} - NO FALLBACK PATHS EXIST`);
+    // Use default config from codebase
+    mcpConfig = JSON.parse(readFileSync(defaultConfigPath, 'utf8'));
+    console.log(chalk.yellow(`   ├─ Project config not found, using default config`));
+    console.log(chalk.gray(`   │  (Create ${configPath} to override)`));
   }
 } catch (error) {
-  console.error(chalk.red.bold(`BRUTAL ERROR: Failed to load config from ${configPath}:`, error.message));
-  console.error(chalk.red.bold(`BRUTAL ERROR: This is the ONLY config location - no fallback paths exist`));
-  throw new Error(`BRUTAL ERROR: Config loading failed - NO FALLBACKS: ${error.message}`);
+  console.error(chalk.red.bold(`Config loading error:`, error.message));
+  console.error(chalk.yellow(`⚠️  Using default config from codebase`));
+  // Always use the full default config from codebase as fallback
+  mcpConfig = JSON.parse(readFileSync(defaultConfigPath, 'utf8'));
 }
 
 if (!mcpConfig.mcpServers) {
@@ -365,9 +369,9 @@ async function runAgent() {
       console.log('🔍 Starting task execution...');
       console.log(`📝 Task prompt: ${taskPrompt.substring(0, 100)}...`);
 
-      // Use a simplified test prompt to prevent hanging from complex nested prompts
-      console.log('🎯 Using simplified test prompt to prevent hanging...');
-      const testPrompt = `Task: ${task.substring(0, 100)}${task.length > 100 ? '...' : ''}`;
+      // Use the task prompt from the agent
+      console.log('🎯 Using task prompt with working directory fix...');
+      const testPrompt = taskPrompt;
 
       try {
         console.log('🔧 Creating agent query with proper MCP server configuration...');
@@ -396,7 +400,7 @@ async function runAgent() {
             ],
             thinking: {
               type: 'enabled',
-              budget_tokens: 10000
+              budget_tokens: 2000
             },
             mcpServers: mcpConfig.mcpServers
           }
