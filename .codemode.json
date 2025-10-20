@@ -1,21 +1,9 @@
 {
   "$schema": "https://schemas.modelcontextprotocol.io/0.1.0/mcp.json",
   "mcpServers": {
-    "codeMode": {
-      "command": "node",
-      "args": ["code-mode.js"]
-    },
     "builtInTools": {
       "command": "node",
       "args": ["built-in-tools-mcp.js"]
-    },
-    "playwright": {
-      "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"]
-    },
-    "vexify": {
-      "command": "npx",
-      "args": ["-y", "vexify@latest", "mcp"]
     }
   }
 }
