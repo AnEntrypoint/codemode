@@ -608,12 +608,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'execute',
-        description: 'Execute JavaScript code in a persistent server environment with access to file operations, search, and management functions',
+        name: 'mcp__codeMode__execute',
+        description: 'Execute JavaScript code in a persistent server environment with access to file operations, search, and management functions. Available functions: Read(path, offset?, limit?), Write(path, content), Edit(path, oldString, newString, replaceAll?), Glob(pattern, path?), Grep(pattern, path?, options?), Bash(command, description?, timeout?), TodoWrite(todos), WebFetch(url), get_server_state(), kill_execution(execId?), clear_context(), get_async_execution(execId), list_async_executions()',
         inputSchema: {
           type: 'object',
           properties: {
-            code: { type: 'string', description: 'JavaScript code to execute in the persistent server environment' }
+            code: { type: 'string', description: 'JavaScript code to execute in the persistent server environment. Use await for all function calls. Example: await Read("file.txt")' }
           },
           required: ['code']
         }
@@ -741,7 +741,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'ASTModify':
         result = await handleASTModify(args);
         break;
-      case 'execute':
+      case 'mcp__codeMode__execute':
         result = await handleExecute(args);
         break;
       default:

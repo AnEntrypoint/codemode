@@ -398,14 +398,7 @@ async function runAgent() {
               type: 'enabled',
               budget_tokens: 10000
             },
-            mcpServers: {
-              codeMode: {
-                type: 'stdio',
-                command: 'node',
-                args: [dirname(__filename) + '/code-mode.js'],
-                cwd: originalCwd
-              }
-            }
+            mcpServers: mcpConfig.mcpServers
           }
         });
 
