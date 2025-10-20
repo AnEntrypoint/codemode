@@ -267,11 +267,71 @@ await initializeInterruptionSystem();
 
 const interruptionInstructions = interruptionSystem ? interruptionSystem.generateAgentInstructions() : '';
 
-const agentPrompt = `You are an AI assistant with access to a single execute tool that allows you to run JavaScript code in real time. You must use this environment to fulfill the task as changes to the current folder.
+const agentPrompt = `You are an AI assistant with access to a SINGLE execute tool that allows you to run JavaScript code in real time. You must use this environment to fulfill the task as changes to the current folder.
 
-# Execute Tool Interface
+# 🚨 CRITICAL: ONLY USE CODEMODE EXECUTE TOOL
 
-IMPORTANT: You only have access to the execute tool (may also be named mcp__codeMode__execute). Use it to run JavaScript code that provides these functions:
+**YOU ONLY HAVE ACCESS TO ONE TOOL: the codemode execute tool (also called mcp__codemode__execute)**
+
+❌ **NEVER try to use tools like: Bash, LS, Read, Write, Edit, Glob, Grep, WebFetch, TodoWrite directly**
+❌ **NEVER use tool calls like 📧 Tool Use: Bash**
+❌ **These tools are NOT available to you directly and will be rejected**
+
+✅ **ALWAYS use the codemode execute tool with JavaScript code**
+✅ **All functions like LS, Bash, Read, etc. are ONLY available inside JavaScript code**
+
+# Correct Usage Pattern
+
+## ❌ WRONG (Will Fail):
+```
+📧 Tool Use: Bash
+command: ls -la
+```
+
+## ✅ CORRECT (Will Work):
+```
+📧 Tool Use: codemode_execute
+workingDirectory: /path/to/dir
+code: |
+  const result = await Bash('ls -la');
+  console.log(result);
+```
+
+## More Examples:
+
+### List Directory:
+❌ WRONG: `📧 Tool Use: LS`
+✅ CORRECT:
+```
+📧 Tool Use: codemode_execute
+code: |
+  const files = await LS('.', true, false, true);
+  console.log('Files:', files);
+```
+
+### Read File:
+❌ WRONG: `📧 Tool Use: Read`
+✅ CORRECT:
+```
+📧 Tool Use: codemode_execute
+code: |
+  const content = await Read('package.json');
+  console.log(content);
+```
+
+### Write File:
+❌ WRONG: `📧 Tool Use: Write`
+✅ CORRECT:
+```
+📧 Tool Use: codemode_execute
+code: |
+  await Write('test.txt', 'Hello World');
+  console.log('File written');
+```
+
+# Codemode Execute Tool Interface
+
+Use the codemode_execute tool to run JavaScript code that provides these functions:
 
 ## File Operations
 await Read(path, offset?, limit?) → string - Read file content with line numbers (returns string, not object)
@@ -302,7 +362,7 @@ await clear_context() → null - Reset everything, kills all executions and clea
 await get_async_execution(execId) → object - Get full execution log from async mode
 await list_async_executions() → object[] - List all async executions with details
 
-CRITICAL: Use the execute tool with a "code" parameter containing your JavaScript code.
+CRITICAL: Use the codemode_execute tool with a "code" parameter containing your JavaScript code.
 
 # Server Management & Persistence
 
@@ -337,15 +397,25 @@ await list_async_executions() → List all async executions with details
 
 # Instructions
 
+## 🚨 REMEMBER: ONLY USE CODEMODE EXECUTE TOOL
+
+**IF YOU ARE TEMPTED TO USE ANY TOOL OTHER THAN "codemode_execute" - DON'T!**
+**PUT ALL YOUR CODE INSIDE THE codemode_execute TOOL'S "code" PARAMETER**
+
 Avoid using const in execute use mutables that can be overridden later
-Use the execute tool to run JavaScript code with these functions available
-use programmatic flow to reduce the amount of execute calls needed, conditionals, loops, and code structure is available to you no need for linear tool-by-tool execution
+Use the codemode_execute tool to run JavaScript code with these functions available
+use programmatic flow to reduce the amount of codemode_execute calls needed, conditionals, loops, and code structure is available to you no need for linear tool-by-tool execution
 Write code that completes the entire task, use as many executions as you need to
 All MCP tools are async functions. Always use "await" when calling them.
 Before asking the user to do something, first check if you can do it yourself or with any of your tools
 Always apply all code changes to the codebase before finishing
 Your real time environment can import parts of the codebase, use that to isolate each part and test if it works during debugging
 Mandatory: always continuously update and maintain the todo list as a plan to complete the entire requested task, keep working and updating it till the entire task is complete
+
+## Final Check Before Using Tools:
+1. Am I trying to use Bash, LS, Read, Write, Edit, etc. directly? → **NO!**
+2. Am I putting my code inside the codemode_execute tool's "code" parameter? → **YES!**
+3. Are all my tool calls wrapped in await inside JavaScript? → **YES!**
 
 # CRITICAL: Console Logging Guidelines
 
@@ -416,7 +486,7 @@ async function runAgent() {
             model: 'claude-sonnet-4-5',
             permissionMode: 'bypassPermissions',
             // Allow ONLY execute, Read, and Write tools (MCP SDK prefixes them with mcp__<serverName>__)
-            allowedTools: ['mcp__codeMode__execute', 'mcp__builtInTools__Read', 'mcp__builtInTools__Write'],
+            allowedTools: ['mcp__codemode__execute', 'Read', 'Write'],
             disallowedTools: [
               // Disable all built-in Claude Code tools
               'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Edit',

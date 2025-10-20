@@ -52,7 +52,7 @@ class MCPServerManager {
     throw new Error('BRUTAL ERROR: config.mcpServers is undefined - NO FALLBACKS');
   }
   for (const [serverName, serverConfig] of Object.entries(config.mcpServers)) {
-      if (serverName === 'codeMode') continue;
+      if (serverName === 'codemode') continue;
 
       try {
         await this.startServer(serverName, serverConfig);
