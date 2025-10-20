@@ -3,7 +3,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { spawn } from 'child_process';
+import { spawn, fork } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'fs';
 import { join, resolve as resolvePath, dirname, basename } from 'path';
 import { randomUUID } from 'crypto';
@@ -1333,12 +1333,12 @@ async function handleExecute(args) {
     let worker = executionWorkers.get(workingDirectory);
 
     if (!worker || worker.killed) {
-      // Start new execution worker
+      // Start new execution worker using fork (not spawn) to get IPC support
       const workerPath = join(dirname(new URL(import.meta.url).pathname), 'execution-worker.js');
-      worker = spawn('node', [workerPath], {
-        stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      worker = fork(workerPath, [], {
         cwd: workingDirectory,
-        env: { ...process.env }
+        env: { ...process.env },
+        stdio: ['inherit', 'inherit', 'inherit', 'ipc']
       });
 
       worker.killed = false;
