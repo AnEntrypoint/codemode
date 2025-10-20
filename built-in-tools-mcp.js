@@ -1344,15 +1344,10 @@ async function handleExecute(args) {
       worker.killed = false;
       worker.pendingResults = new Map();
 
-      // Set up message handling
+      // Set up message handling (only for MCP_CALL, not EXEC_RESULT)
+      // EXEC_RESULT is handled by per-execution resultHandler below
       worker.on('message', (msg) => {
-        if (msg.type === 'EXEC_RESULT' && msg.execId === execId) {
-          if (msg.success) {
-            resolve(msg.result);
-          } else {
-            reject(new Error(msg.error));
-          }
-        } else if (msg.type === 'MCP_CALL') {
+        if (msg.type === 'MCP_CALL') {
           // Handle MCP tool calls from the execution worker
           handleMCPWorkerCall(worker, msg);
         }
