@@ -4,6 +4,18 @@
     "builtInTools": {
       "command": "node",
       "args": ["built-in-tools-mcp.js"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "glootie": {
+      "command": "npx",
+      "args": ["-y", "mcp-glootie@latest"]
+    },
+    "vexify": {
+      "command": "npx",
+      "args": ["-y", "vexify@latest", "mcp"]
     }
   }
 }

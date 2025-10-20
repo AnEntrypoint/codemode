@@ -415,12 +415,18 @@ async function runAgent() {
           options: {
             model: 'claude-sonnet-4-5',
             permissionMode: 'bypassPermissions',
-            // Allow execute, Read, and Write tools (MCP SDK prefixes them with mcp__<serverName>__)
+            // Allow ONLY execute, Read, and Write tools (MCP SDK prefixes them with mcp__<serverName>__)
             allowedTools: ['mcp__codeMode__execute', 'mcp__builtInTools__Read', 'mcp__builtInTools__Write'],
             disallowedTools: [
+              // Disable all built-in Claude Code tools
               'Task', 'Bash', 'Glob', 'Grep', 'ExitPlanMode', 'Edit',
               'NotebookEdit', 'WebFetch', 'TodoWrite', 'WebSearch', 'BashOutput', 'KillShell',
-              'SlashCommand', 'Skill'
+              'SlashCommand', 'Skill',
+              // Disable all other builtInTools MCP tools
+              'mcp__builtInTools__Bash', 'mcp__builtInTools__Edit', 'mcp__builtInTools__Glob',
+              'mcp__builtInTools__Grep', 'mcp__builtInTools__LS', 'mcp__builtInTools__TodoWrite',
+              'mcp__builtInTools__WebFetch', 'mcp__builtInTools__ASTLint', 'mcp__builtInTools__ASTSearch',
+              'mcp__builtInTools__ASTReplace', 'mcp__builtInTools__ASTModify'
             ],
             thinking: {
               type: 'enabled',
